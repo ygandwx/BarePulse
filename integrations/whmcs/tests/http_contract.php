@@ -42,6 +42,8 @@ try {
     $_SERVER['REQUEST_METHOD'] = 'GET'; $_POST = []; $_SESSION = [];
     $page = barepulse_ClientArea($params);
     check($page['templatefile'] === 'clientarea' && $page['vars']['bp']['authorized'], 'WHMCS ClientArea wrapper failed');
+    $httpChart = $page['vars']['bp']['traffic']['chart'];
+    check($httpChart['available'] && $httpChart['rows'][0]['upload_bytes'] === '6000' && $httpChart['rows'][0]['download_bytes'] === '12000', 'Actual cURL interval data did not reach client chart');
     check(!str_contains(json_encode($page, JSON_THROW_ON_ERROR), (string) getenv('BAREPULSE_WHMCSTEST_SECRET')), 'Secret leaked to template variables');
     $form = $page['vars']['bp'];
     $_SERVER['REQUEST_METHOD'] = 'POST';

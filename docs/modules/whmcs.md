@@ -32,6 +32,24 @@ never translated into a physical power/network operation. Task display reports
 acceptance, completion and target observation separately; traffic bytes remain
 decimal strings, with coverage notes and unallocated intervals shown.
 
+The product-detail page renders an SVG upload/download chart from the platform's
+actual `intervals` and `samples` response. Each source interval is a horizontal
+average-rate segment over its measured duration; different sources are overlaid,
+not silently summed. Unknown intervals are grey bands, recovered gaps and
+cross-period unallocated totals use dashed segments, and failed samples appear
+as red dots. Empty coverage is not drawn as zero. The latest sample timestamp and
+an accessible table of exact byte strings accompany the chart. A baseline-only
+sample does not invent an interval rate.
+
+The PHP view model bounds work to 2,000 incoming intervals, plots the latest 200,
+includes at most 100 samples and displays 20 detail rows. It reports truncated
+and invalid interval counts, validates timestamps and unsigned decimal strings
+of at most 30 digits, and emits bounded numeric SVG coordinates. Floating-point
+conversion is used only for display coordinates and approximate bps labels;
+accounting and byte labels retain their original decimal strings. Raw JSON,
+device addresses and credential metadata are not passed into scripts or SVG.
+The chart needs no third-party JavaScript or browser-side request credentials.
+
 ## Executed offline evidence
 
 On 2026-10-15, PHP 8.5.11 Windows NTS was obtained from the official PHP download
@@ -42,8 +60,8 @@ This local executable does not alter the system PHP configuration.
 | Check | Result |
 | --- | --- |
 | `php -l` for module and library PHP files | PASS |
-| `php integrations/whmcs/tests/contract.php` | PASS: 54 assertions against WHMCS framework/API stubs |
-| `php integrations/whmcs/tests/http_contract.php` with cURL enabled | PASS: 69 total assertions, including real loopback HTTP, HMAC, idempotency, lifecycle, owned client page and console contracts |
+| `php integrations/whmcs/tests/contract.php` | PASS: 96 assertions against WHMCS framework/API stubs, including measured chart rates, gaps, invalid input, exact bytes and bounded SVG data |
+| `php integrations/whmcs/tests/http_contract.php` with cURL enabled | PASS: 112 total assertions (includes the 96 above), including real loopback HTTP, HMAC, idempotency, lifecycle, owned client page, chart data and console contracts |
 | `TestWHMCSPHPRealHandlerContract` | PASS: 17 actual PHP/cURL→Go HTTP→PostgreSQL assertions, including precise large byte counts and stable task identity |
 | `TestIntegrationRevocationRotationPreservesProtection` | PASS: disabling and rotating reject old credentials, preserve protection and do not trigger physical operations |
 | Live licensed WHMCS, Smarty rendering and installed theme integration | NOT_RUN: no WHMCS test instance supplied |
@@ -55,6 +73,12 @@ CSRF rejection before network I/O, hidden maintenance actions, duplicate submiss
 idempotency-key retention after timeout, partial/unknown task semantics, large
 traffic integers, malformed API responses, disabled redirect following, lifecycle
 conflicts and no secret in the template variables. Fixture routes are not deployed.
+
+The chart increment was actually checked with
+`./scripts/verify-whmcs.ps1 -Php ../toolchain/php/php.exe -ExtensionDirectory ../toolchain/php/ext`:
+all seven PHP files passed lint and both contract suites passed. The contract
+checks do not execute Smarty; actual theme rendering remains a separate
+licensed-instance acceptance item below.
 
 ## Required licensed-instance checks
 

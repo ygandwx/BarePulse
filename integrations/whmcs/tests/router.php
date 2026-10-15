@@ -23,7 +23,9 @@ if ($state['mode'] === 'malformed') { echo '<html>fixture</html>'; exit; }
 switch ($action) {
 case 'summary': echo json_encode(['state' => 'active', 'server' => ['id' => 'fixture', 'name' => 'Fixture server']]); break;
 case 'power': echo json_encode(['power_state' => 'unknown', 'supply_state' => 'on', 'actions' => ['power_on'], 'simulated' => true]); break;
-case 'traffic': echo json_encode(['upload_bytes' => '18446744073709551615', 'download_bytes' => '0']); break;
+case 'traffic': echo json_encode(['upload_bytes' => '18446744073709551615', 'download_bytes' => '0',
+    'intervals' => [['source_id' => 'loopback-source', 'starts_at' => '2026-10-15T00:00:00Z', 'ends_at' => '2026-10-15T00:01:00Z', 'upload_bytes' => '6000', 'download_bytes' => '12000', 'quality' => 'normal', 'billable' => true]],
+    'samples' => [['source_id' => 'loopback-source', 'observed_at' => '2026-10-15T00:01:00Z', 'quality' => 'normal', 'error_code' => '']]]); break;
 case 'power-actions':
     if ($method !== 'POST' || !is_string($data['idempotency_key'] ?? null)) fixtureError(400, 'IDEMPOTENCY_REQUIRED');
     $key = $data['idempotency_key'];

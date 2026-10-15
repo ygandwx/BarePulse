@@ -33,6 +33,7 @@ function expectError(callable $fn, string $code): void {
 final class FakeAPI implements \BarePulse\ServiceAPI {
     public array $calls = [];
     public bool $timeout = false;
+    public array $traffic = ['upload_bytes' => '18446744073709551615', 'download_bytes' => '2', 'coverage_note' => 'confirmed intervals only'];
     public function request(string $method, string $serviceId, string $action, array $data): array {
         $this->calls[] = [$method, $serviceId, $action, $data];
         check($serviceId === '42' && ($data['client_id'] ?? null) === '7', 'Browser identity reached API');
@@ -42,7 +43,7 @@ final class FakeAPI implements \BarePulse\ServiceAPI {
         }
         if ($action === 'summary') return ['state' => 'active', 'server' => ['id' => 'server-fixture', 'name' => '<script>fixture</script>', 'model' => 'test']];
         if ($action === 'power') return ['power_state' => 'unknown', 'supply_state' => 'on', 'quality' => 'cached', 'simulated' => true, 'execution_enabled' => true, 'actions' => ['power_on', 'disable_port', 'hard_reset']];
-        if ($action === 'traffic') return ['upload_bytes' => '18446744073709551615', 'download_bytes' => '2', 'coverage_note' => 'confirmed intervals only'];
+        if ($action === 'traffic') return $this->traffic;
         if ($action === 'task') return ['id' => str_repeat('a', 48), 'status' => 'unknown', 'action' => 'hard_reset', 'result' => ['accepted' => true, 'completed' => false, 'target_reached' => false]];
         if ($action === 'console') return ['portal_url' => 'https://platform.example.invalid/portal.html#' . str_repeat('c', 48)];
         throw new RuntimeException('Unexpected API action ' . $action);
@@ -116,5 +117,50 @@ expectError(static fn() => barepulse_serviceIdentity($params, true), 'FORBIDDEN'
 check(barepulse_ClientAreaCustomButtonArray() === [], 'Unguarded custom action buttons exposed');
 $template = file_get_contents(__DIR__ . '/../barepulse/clientarea.tpl');
 check(str_contains($template, "|escape:'html'") && !str_contains($template, 'configoption3') && !str_contains($template, 'Signature'), 'Template exposes credentials or omits escaping');
+
+// Render the actual filtered chart view model, not a second chart implementation.
+function chartView(array $traffic): array {
+    $chartAPI = new FakeAPI(); $chartAPI->traffic = $traffic; $chartSession = [];
+    $chartArea = new \BarePulse\ClientArea($chartAPI, static fn($url) => $url);
+    return $chartArea->render('42', '7', 'GET', [], $chartSession)['traffic']['chart'];
+}
+$normal = ['source_id' => 'source-primary', 'starts_at' => '2026-10-15T00:00:00Z', 'ends_at' => '2026-10-15T00:01:00Z',
+    'upload_bytes' => '6000', 'download_bytes' => '12000', 'quality' => 'normal', 'billable' => true];
+$gap = array_replace($normal, ['starts_at' => '2026-10-15T00:01:00Z', 'ends_at' => '2026-10-15T00:04:00Z', 'upload_bytes' => '18000', 'download_bytes' => '36000', 'quality' => 'recovered_gap']);
+$unknown = array_replace($normal, ['starts_at' => '2026-10-15T00:04:00Z', 'ends_at' => '2026-10-15T00:05:00Z', 'upload_bytes' => null, 'download_bytes' => null, 'quality' => 'counter_reset', 'billable' => false]);
+$boundary = array_replace($normal, ['starts_at' => '2026-10-14T23:59:00Z', 'ends_at' => '2026-10-15T00:00:00Z', 'quality' => 'boundary_unallocated', 'billable' => false]);
+$sample = ['source_id' => 'source-primary', 'observed_at' => '2026-10-15T00:05:00.123456789Z', 'quality' => 'collection_failed', 'error_code' => 'device_offline'];
+$chart = chartView(['intervals' => [$normal, $unknown, $gap, $boundary], 'samples' => [$sample], 'sources' => [['device_id' => 'private-device-id', 'address' => 'secret-address']]]);
+check($chart['available'] && count($chart['intervals']) === 4, 'Measured source intervals did not reach chart');
+check($chart['intervals'][0]['kind'] === 'unknown' && $chart['intervals'][0]['upload_bytes'] === 'unknown', 'Unknown interval was plotted as zero traffic');
+check($chart['intervals'][1]['kind'] === 'gap' && $chart['intervals'][1]['upload_y'] === '115.00' && $chart['intervals'][1]['download_y'] === '30.00', 'Gap average was not based on actual interval duration');
+check($chart['intervals'][2]['upload_y'] === $chart['intervals'][1]['upload_y'] && $chart['intervals'][2]['download_y'] === $chart['intervals'][1]['download_y'], 'Equivalent measured rates have different coordinates');
+check($chart['intervals'][3]['kind'] === 'gap' && !$chart['intervals'][3]['billable'], 'Unallocated cross-period bytes marked as normal or billed');
+check($chart['latest_sample'] === $sample['observed_at'] && $chart['samples'][0]['error'] === 'device_offline', 'Collection failure/time missing from chart');
+check(!str_contains(json_encode($chart, JSON_THROW_ON_ERROR), 'secret-address') && !str_contains(json_encode($chart, JSON_THROW_ON_ERROR), 'private-device-id'), 'Chart leaked device metadata');
+$large = array_replace($normal, ['upload_bytes' => '18446744073709551615', 'download_bytes' => '999999999999999999999999999999']);
+$largeChart = chartView(['intervals' => [$large]]);
+check($largeChart['rows'][0]['upload_bytes'] === $large['upload_bytes'] && $largeChart['rows'][0]['download_bytes'] === $large['download_bytes'], 'Chart labels lost exact large byte strings');
+foreach ($largeChart['intervals'] as $point) {
+    foreach (['x1', 'x2', 'width', 'upload_y', 'download_y'] as $coordinate) {
+        check(preg_match('/^[0-9]+\.[0-9]{2}$/D', $point[$coordinate]) === 1 && (float) $point[$coordinate] >= 0 && (float) $point[$coordinate] <= 960, 'Unbounded or non-finite SVG coordinate');
+    }
+}
+$bad = chartView(['intervals' => [array_replace($normal, ['upload_bytes' => '1e900']), array_replace($normal, ['download_bytes' => '<svg/onload=alert(1)>']),
+    array_replace($normal, ['upload_bytes' => '-1']), array_replace($normal, ['starts_at' => '2026-02-30T00:00:00Z']),
+    array_replace($normal, ['ends_at' => $normal['starts_at']]), array_replace($normal, ['source_id' => '" onload="x', 'quality' => '<script>'])],
+    'samples' => [['observed_at' => 'tomorrow'], $sample]]);
+check($bad['invalid'] === 6 && count($bad['intervals']) === 4, 'Malformed numeric/timestamp chart data not rejected');
+check(count(array_filter($bad['intervals'], static fn($i) => $i['kind'] === 'unknown' && !$i['billable'])) === 4, 'Invalid records must not produce measured/billed traffic');
+check(!str_contains(json_encode($bad, JSON_THROW_ON_ERROR), 'onload') && !str_contains(json_encode($bad, JSON_THROW_ON_ERROR), '<script>'), 'Untrusted SVG/code metadata reached chart');
+$many = chartView(['intervals' => array_fill(0, 2200, $normal), 'samples' => array_fill(0, 200, $sample)]);
+check(count($many['intervals']) === 200 && count($many['rows']) === 20 && count($many['samples']) === 100 && $many['omitted'] === 2000, 'Chart resource limits or truncation report failed');
+$empty = chartView([]);
+check(!$empty['available'] && $empty['intervals'] === [] && $empty['max_bps'] === 'unknown', 'Missing data generated a zero-traffic chart');
+$baseline = chartView(['samples' => [array_replace($sample, ['quality' => 'baseline', 'error_code' => ''])]]);
+check($baseline['available'] && $baseline['intervals'] === [] && count($baseline['samples']) === 1 && $baseline['max_bps'] === 'unknown', 'Baseline-only sample fabricated an interval rate');
+$zero = chartView(['intervals' => [array_replace($normal, ['upload_bytes' => '0', 'download_bytes' => '0'])]]);
+check($zero['intervals'][0]['kind'] === 'normal' && $zero['intervals'][0]['upload_y'] === '200.00', 'Measured zero must remain distinct from missing data');
+check(str_contains($template, '<svg ') && str_contains($template, '$bp.traffic.chart.intervals') && str_contains($template, 'stroke-dasharray="7 4"') && str_contains($template, '$point.upload_bytes|escape'), 'Customer template lacks dynamic escaped chart/gap rendering');
 echo 'PASS: ' . $checks . " offline WHMCS assertions (framework stubs; no live WHMCS).\n";
 }
