@@ -8,6 +8,10 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [开发流程与架构图](docs/development-workflow.md) | 系统架构、阶段依赖、持续实现循环、具体任务与验收门槛 |
+| [Codex 编码规则](AGENTS.md) | 持续推进、设备边界、测试、提交与暂停条件 |
+| [实现进度与续接记录](docs/implementation-status.md) | 阶段状态、测试证据、阻塞与下一条任务 |
+| [Codex 启动提示词](docs/codex-start-prompt.md) | 可复制的持续编码任务指令 |
 | [开发计划](docs/development-plan.md) | 已确认需求、约 30 台服务器的设备基线、流量核算、电源驱动、共享控制台、数据模型、API、WHMCS 对接、开发阶段与验收标准 |
 | [定制 16 口 PiKVM 接入细节](docs/pikvm-integration.md) | 手册与 kvmd 3.142 源码排查、接口映射、返回值、鉴权、Nginx 路由、共享媒体隔离及待验证项 |
 
