@@ -16,7 +16,7 @@ jobs:
           POSTGRES_DB: barepulse_test
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U barepulse -d barepulse_test'
+          --health-cmd "pg_isready -U barepulse -d barepulse_test"
           --health-interval 3s --health-timeout 3s --health-retries 20
     env:
       TEST_DATABASE_URL: postgres://barepulse:test-only-local-secret@127.0.0.1:5432/barepulse_test?sslmode=disable
@@ -31,8 +31,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install PHP contract test runtime
+        run: sudo apt-get update && sudo apt-get install -y php-cli php-curl
       - run: sh scripts/verify.sh
+      - run: python3 api/check_contract.py
+      - run: sh scripts/verify-whmcs.sh
       - run: docker compose config --quiet
         env:
           POSTGRES_PASSWORD: compose-validation-only
-      - run: docker build -t barepulse:ci .
+      - run: sh scripts/compose-smoke.sh

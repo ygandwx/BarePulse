@@ -59,7 +59,13 @@ func (a *App) redeemPortal(w http.ResponseWriter, r *http.Request) error {
 	}
 	defer tx.Rollback(r.Context())
 	var mapping, session, actor string
-	e = tx.QueryRow(r.Context(), `UPDATE portal_grants p SET consumed=true FROM service_mappings m,servers s WHERE p.token_hash=$1 AND p.kind='ticket' AND NOT p.consumed AND p.expires_at>now() AND m.id=p.mapping_id AND m.state='active' AND s.id=m.server_id AND s.owner_id=m.owner_id RETURNING p.mapping_id,p.session_id,p.actor_id`, tokenHash(b.Ticket)).Scan(&mapping, &session, &actor)
+	var integration string
+	// Serialize ticket redemption with disabling/rotating the integration. This
+	// prevents an access grant being inserted just after the revocation DELETE.
+	if e = tx.QueryRow(r.Context(), `SELECT i.id FROM portal_grants p JOIN service_mappings m ON m.id=p.mapping_id JOIN integrations i ON i.id=m.integration_id WHERE p.token_hash=$1 AND i.enabled FOR SHARE OF i`, tokenHash(b.Ticket)).Scan(&integration); e != nil {
+		return fail(403, "PORTAL_TICKET_INVALID", "Portal ticket is invalid or revoked")
+	}
+	e = tx.QueryRow(r.Context(), `UPDATE portal_grants p SET consumed=true FROM service_mappings m,servers s,integrations i,users u WHERE p.token_hash=$1 AND p.kind='ticket' AND NOT p.consumed AND p.expires_at>now() AND m.id=p.mapping_id AND m.state='active' AND s.id=m.server_id AND s.owner_id=m.owner_id AND i.id=m.integration_id AND i.enabled AND u.id=p.actor_id AND u.id=m.owner_id AND u.role IN ('admin','customer') RETURNING p.mapping_id,p.session_id,p.actor_id`, tokenHash(b.Ticket)).Scan(&mapping, &session, &actor)
 	if e != nil {
 		return fail(403, "PORTAL_TICKET_INVALID", "Portal ticket is invalid, consumed, or expired")
 	}

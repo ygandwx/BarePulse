@@ -89,6 +89,7 @@ func (a *App) registerWHMCS() {
 		jsonResponse(w, 200, out)
 		return nil
 	})
+	a.route("PUT /api/v1/integrations/{id}", true, a.updateIntegration)
 	a.route("POST /api/v1/service-mappings", true, a.createMapping)
 	a.route("POST /api/v1/service-mappings/{id}/state", true, a.adminMappingState)
 	for _, verb := range []string{"GET", "POST"} {
@@ -99,6 +100,45 @@ func (a *App) registerWHMCS() {
 		})
 	}
 	a.registerPortal()
+}
+
+// Disable or rotate an integration without deleting its history or touching devices.
+// All issued portal credentials are destroyed, so re-enabling cannot revive them.
+func (a *App) updateIntegration(w http.ResponseWriter, r *http.Request, u User) error {
+	var b struct {
+		Name      string `json:"name"`
+		SecretRef string `json:"secret_ref"`
+		Enabled   *bool  `json:"enabled"`
+	}
+	if e := decode(r, &b); e != nil {
+		return e
+	}
+	if len(b.Name) < 1 || len(b.Name) > 100 || !secretRefPattern.MatchString(b.SecretRef) || b.Enabled == nil {
+		return fail(400, "INVALID_INTEGRATION", "Name, BAREPULSE_ secret reference and explicit enabled state required")
+	}
+	tx, e := a.DB.Begin(r.Context())
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(r.Context())
+	result, e := tx.Exec(r.Context(), `UPDATE integrations SET name=$2,secret_ref=$3,enabled=$4 WHERE id=$1`, r.PathValue("id"), b.Name, b.SecretRef, *b.Enabled)
+	if e != nil {
+		return dbError(e)
+	}
+	if result.RowsAffected() == 0 {
+		return fail(404, "NOT_FOUND", "Integration not found")
+	}
+	if _, e = tx.Exec(r.Context(), `DELETE FROM portal_grants p USING service_mappings m WHERE p.mapping_id=m.id AND m.integration_id=$1`, r.PathValue("id")); e != nil {
+		return e
+	}
+	if e = audit(r.Context(), tx, u, "integration.update", r.PathValue("id"), map[string]any{"name": b.Name, "enabled": *b.Enabled, "portal_credentials_revoked": true}); e != nil {
+		return e
+	}
+	if e = tx.Commit(r.Context()); e != nil {
+		return e
+	}
+	jsonResponse(w, 200, map[string]any{"id": r.PathValue("id"), "enabled": *b.Enabled})
+	return nil
 }
 func (a *App) createMapping(w http.ResponseWriter, r *http.Request, u User) error {
 	var b struct {

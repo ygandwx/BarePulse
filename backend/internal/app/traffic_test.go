@@ -563,3 +563,159 @@ func TestTrafficPGMemberVersionRefreshKeepsHistory(t *testing.T) {
 		t.Fatal("refresh accepted changed customer")
 	}
 }
+
+// The acceptance baseline explicitly names three servers. Keep this fixture exact
+// so a two-member aggregation test is not mistaken for A01/A02 evidence.
+func trafficThreeServers(t *testing.T) (trafficFixture, []string, []string) {
+	t.Helper()
+	f := newTrafficFixture(t)
+	ctx := context.Background()
+	response := testRequest(t, f.a, "DELETE", "/api/v1/traffic/accounts/"+f.account, nil, f.admin)
+	if response.Code != 200 {
+		t.Fatalf("retire initial fixture: %d %s", response.Code, response.Body)
+	}
+	servers := []string{f.server, f.server2, newID()}
+	bindings := []string{f.binding, newID(), newID()}
+	if _, err := f.a.DB.Exec(ctx, `INSERT INTO servers(id,name,owner_id) VALUES($1,$1,$2)`, servers[2], f.owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < 3; i++ {
+		if _, err := f.a.DB.Exec(ctx, `INSERT INTO bindings(id,server_id,device_id,kind,port) VALUES($1,$2,$3,'network',$4)`, bindings[i], servers[i], f.device, 7+i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return f, servers, bindings
+}
+
+func trafficThreePortSource(t *testing.T, f trafficFixture, binding string, index int) string {
+	t.Helper()
+	response := testRequest(t, f.a, "POST", "/api/v1/traffic/sources", map[string]any{"account_id": f.account, "binding_id": binding, "kind": "port", "role": "primary", "network_domain": "three-server-vlan", "vlan_id": 300, "if_name": fmt.Sprintf("mock-eth%d", index), "expected_if_index": index, "mock": true}, f.admin)
+	return trafficResponseID(t, response, 201)
+}
+
+func trafficThreePortSamples(t *testing.T, f trafficFixture, source string, i int, replay bool) {
+	t.Helper()
+	ctx := context.Background()
+	base := trafficTestSample(trafficTestTime(), "initial", "9007199254740993", "18014398509481986")
+	base.IfIndex = 7 + i
+	base.IfName = fmt.Sprintf("mock-eth%d", 7+i)
+	if _, err := f.a.recordTrafficSample(ctx, source, base, &f.admin, true); err != nil {
+		t.Fatal(err)
+	}
+	sample := base
+	sample.SampleKey = "increment"
+	sample.ObservedAt = sample.ObservedAt.Add(time.Minute)
+	sample.Uptime = "16000"
+	sample.InOctets = fmt.Sprintf("%d", int64(9007199254740993)+int64(i+1)*101)
+	sample.OutOctets = fmt.Sprintf("%d", int64(18014398509481986)+int64(i+1)*307)
+	recorded, err := f.a.recordTrafficSample(ctx, source, sample, &f.admin, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay {
+		for attempt := 0; attempt < 3; attempt++ {
+			got, err := f.a.recordTrafficSample(ctx, source, sample, &f.admin, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got["duplicate"] != true || got["id"] != recorded["id"] {
+				t.Fatalf("replay generated a new sample: %+v", got)
+			}
+		}
+	}
+}
+
+func TestTrafficPGThreeIndependentAccountsSameVLAN(t *testing.T) {
+	f, servers, bindings := trafficThreeServers(t)
+	accounts := make([]string, 3)
+	for i := 0; i < 3; i++ {
+		response := testRequest(t, f.a, "POST", "/api/v1/traffic/accounts", map[string]any{"name": fmt.Sprintf("Independent server %d", i+1), "owner_id": f.owner.ID, "quota_bytes": "1000000000000", "direction": "both", "timezone": "UTC", "cycle_day": 1, "server_ids": []string{servers[i]}}, f.admin)
+		accounts[i] = trafficResponseID(t, response, 201)
+		f.account = accounts[i]
+		source := trafficThreePortSource(t, f, bindings[i], 7+i)
+		trafficThreePortSamples(t, f, source, i, false)
+	}
+	for i, account := range accounts {
+		f.account = account
+		detail := trafficGetDetail(t, f, trafficTestTime())
+		if detail["upload_bytes"] != fmt.Sprint((i+1)*101) || detail["download_bytes"] != fmt.Sprint((i+1)*307) || detail["used_bytes"] != fmt.Sprint((i+1)*408) {
+			t.Fatalf("independent account %d received another port's bytes: %+v", i+1, detail)
+		}
+		members := detail["members"].([]any)
+		if len(members) != 1 || members[0].(map[string]any)["id"] != servers[i] {
+			t.Fatalf("independent account %d membership changed: %+v", i+1, members)
+		}
+	}
+	f.account = accounts[0]
+	response := testRequest(t, f.a, "POST", "/api/v1/traffic/sources", map[string]any{"account_id": f.account, "device_id": f.device, "kind": "vlan", "role": "primary", "network_domain": "three-server-vlan", "vlan_id": 300, "if_name": "vlan300", "expected_if_index": 300, "mock": true, "coverage_confirmed": true, "vlan_member_ids": []string{servers[0]}}, f.admin)
+	if response.Code != 409 {
+		t.Fatalf("VLAN primary duplicated three independent port accounts: %d %s", response.Code, response.Body)
+	}
+	var count int
+	if err := f.a.DB.QueryRow(context.Background(), `SELECT count(*) FROM traffic_ledger`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("expected one interval per independent server, got %d", count)
+	}
+}
+
+func TestTrafficPGThreeSharedMembersExactReplay(t *testing.T) {
+	f, servers, bindings := trafficThreeServers(t)
+	response := testRequest(t, f.a, "POST", "/api/v1/traffic/accounts", map[string]any{"name": "Exactly three shared members", "owner_id": f.owner.ID, "quota_bytes": "1000000000000", "direction": "both", "timezone": "UTC", "cycle_day": 1, "server_ids": servers}, f.admin)
+	f.account = trafficResponseID(t, response, 201)
+	for i := 0; i < 3; i++ {
+		source := trafficThreePortSource(t, f, bindings[i], 7+i)
+		trafficThreePortSamples(t, f, source, i, true)
+	}
+	detail := trafficGetDetail(t, f, trafficTestTime())
+	if detail["upload_bytes"] != "606" || detail["download_bytes"] != "1842" || detail["used_bytes"] != "2448" || detail["remaining_bytes"] != "999999997552" {
+		t.Fatalf("three-member exact aggregate/replay is wrong: %+v", detail)
+	}
+	members := detail["members"].([]any)
+	if len(members) != 3 {
+		t.Fatalf("expected exactly three shared members, got %d", len(members))
+	}
+	expected := map[string]bool{}
+	for _, server := range servers {
+		expected[server] = true
+	}
+	for _, raw := range members {
+		member := raw.(map[string]any)
+		id := member["id"].(string)
+		if !expected[id] || member["valid"] != true {
+			t.Fatalf("wrong shared membership: %+v", member)
+		}
+		delete(expected, id)
+	}
+	for _, server := range servers {
+		response = testRequest(t, f.a, "GET", "/api/v1/servers/"+server+"/traffic", nil, f.owner)
+		if response.Code != 200 {
+			t.Fatalf("shared owner cannot read member traffic: %d %s", response.Code, response.Body)
+		}
+		var body struct {
+			Account TrafficAccount `json:"account"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Account.ID != f.account {
+			t.Fatal("shared member resolves a different account")
+		}
+		response = testRequest(t, f.a, "GET", "/api/v1/servers/"+server+"/traffic", nil, f.other)
+		if response.Code != 404 {
+			t.Fatalf("other customer accessed shared member: %d", response.Code)
+		}
+	}
+	response = testRequest(t, f.a, "POST", "/api/v1/traffic/accounts", map[string]any{"name": "Forbidden cross-customer group", "owner_id": f.other.ID, "quota_bytes": "1000", "direction": "both", "server_ids": servers}, f.admin)
+	if response.Code != 409 {
+		t.Fatalf("shared members accepted a different account owner: %d %s", response.Code, response.Body)
+	}
+	var samples, ledger int
+	if err := f.a.DB.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM traffic_samples),(SELECT count(*) FROM traffic_ledger)`).Scan(&samples, &ledger); err != nil {
+		t.Fatal(err)
+	}
+	if samples != 6 || ledger != 3 {
+		t.Fatalf("repeated three-server collection duplicated accounting: samples=%d ledger=%d", samples, ledger)
+	}
+}

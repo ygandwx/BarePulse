@@ -5,9 +5,10 @@ idempotency, whole-device scheduling, protection and cooldown persistence. Drive
 receive only the server-resolved `Target` and perform no automatic fallback to
 another driver. Customer action names are `power_on`, `request_shutdown`,
 `hard_reset`, and `power_cycle`, restricted by each adapter's supported capability.
-`hard_power_off` is an explicitly named administrative hard power cut, never a
-substitute for graceful shutdown. PiKVM `enable_port` / `disable_port` are also
-administrative maintenance actions.
+`hard_power_off` is an explicitly named hard cut supported by a verified adapter
+profile, but is not exposed by the current platform power-action API. It is never
+a substitute for graceful shutdown. PiKVM `enable_port` / `disable_port` are
+administrator-only maintenance actions.
 
 `Result` independently records `accepted`, `completed`, and `target_reached`.
 `Status=unknown` with `ACCEPTED_UNVERIFIED` means a command was acknowledged but
@@ -27,8 +28,15 @@ from customer requests. Device response bodies and transport errors are not
 copied into customer result messages.
 
 These flags do not themselves constitute device authorization. The application
-currently registers only mocks. Enabling a real adapter requires a separately
-approved test device, server, port, action and window. No real device was queried.
+registers mocks and a gated real-driver factory. Real power execution additionally
+requires both deployment flags, an administrator-owned profile file with explicit
+approval evidence and unexpired authorization, and exact matching device ID,
+kind, literal-IP endpoint, server, port and action. PiKVM mapping verification,
+Redfish SystemPath, or confirmed APC firmware/outlet OIDs are mandatory for the
+corresponding driver. Profiles and credentials never enter customer responses.
+The worker revalidates this authorization before dispatch. All real access stays
+disabled by default; no real device was queried. Real console/media access stays
+denied until separate connection-revocation and isolation evidence is available.
 
 ## Adapter behavior
 

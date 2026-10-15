@@ -20,6 +20,8 @@ README 给出 Compose 与原生启动命令。迁移必须先执行；`schema_mi
 
 ## 备份与离线恢复演练
 
+Windows 可执行 [备份恢复脚本与验证说明](backup-restore.md)，它使用同一导出快照比较全部关键表内容，并校验媒体哈希；只恢复到不存在的新库。不能用单纯 pg_dump 成功代替恢复验收。
+
 先停止应用写入，保留数据库运行。数据库和媒体文件必须来自同一停写时间点；单独保存密钥，勿写入命令行或备份日志。以下 PostgreSQL 命令通过 `PGHOST/PGPORT/PGUSER/PGDATABASE` 和受保护 `.pgpass` 提供连接，示例文件在 `work/`：
 
 ```sh

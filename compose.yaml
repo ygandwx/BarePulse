@@ -7,7 +7,7 @@ services:
       POSTGRES_DB: barepulse
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres:/var/lib/postgresql
     healthcheck:
@@ -25,8 +25,10 @@ services:
       ALLOW_DEVICE_WRITES: "false"
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-2000000000}
+      BAREPULSE_WHMCSTEST_SECRET: ${BAREPULSE_WHMCSTEST_SECRET:-}
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
     volumes:
       - media:/var/lib/barepulse/media
     depends_on:

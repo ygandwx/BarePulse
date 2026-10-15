@@ -13,6 +13,12 @@ device URLs are trusted. The normal WHMCS product-details route remains the entr
 point, so installed WHMCS account/contact permissions also apply.
 
 Secrets reside in server environment variables referenced by module configuration.
+Administrators can edit an integration's name, secret reference and enabled state
+through the management page and `PUT /api/v1/integrations/{id}`. Every update
+revokes existing portal tickets/access grants; enabling again does not revive them.
+Ticket redemption serializes with that update. Installation protection and
+service/asset history remain intact. Place the new secret in the server environment
+before changing its reference; no secret is entered in the browser.
 The custom template receives only a filtered view model, a session CSRF token,
 form idempotency key and an explicitly requested short-lived portal ticket. It
 does not receive the integration secret. All dynamic template text and attributes
@@ -38,6 +44,8 @@ This local executable does not alter the system PHP configuration.
 | `php -l` for module and library PHP files | PASS |
 | `php integrations/whmcs/tests/contract.php` | PASS: 54 assertions against WHMCS framework/API stubs |
 | `php integrations/whmcs/tests/http_contract.php` with cURL enabled | PASS: 69 total assertions, including real loopback HTTP, HMAC, idempotency, lifecycle, owned client page and console contracts |
+| `TestWHMCSPHPRealHandlerContract` | PASS: 17 actual PHP/cURL→Go HTTP→PostgreSQL assertions, including precise large byte counts and stable task identity |
+| `TestIntegrationRevocationRotationPreservesProtection` | PASS: disabling and rotating reject old credentials, preserve protection and do not trigger physical operations |
 | Live licensed WHMCS, Smarty rendering and installed theme integration | NOT_RUN: no WHMCS test instance supplied |
 | Actual customer device or power requests | NOT_RUN: no device authorization; tests use isolated fixtures |
 
