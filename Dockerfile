@@ -6,7 +6,7 @@ COPY backend ./backend
 COPY frontend ./frontend
 RUN CGO_ENABLED=0 go build -trimpath -o /barepulse ./backend/cmd/barepulse
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home barepulse
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata ipmitool && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home barepulse
 COPY --from=build /barepulse /usr/local/bin/barepulse
 RUN mkdir -p /var/lib/barepulse/media && chown -R 10001:10001 /var/lib/barepulse
 USER 10001:10001

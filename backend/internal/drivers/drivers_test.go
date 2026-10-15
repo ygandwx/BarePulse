@@ -319,7 +319,11 @@ func TestSNMPWriteFenceAndValidation(t *testing.T) {
 	if _, err := integerPacket(p, "1.3.6.1"); err == nil {
 		t.Fatal("SNMP wrong type accepted")
 	}
-	if r := (IPMI{}).Execute(context.Background(), Target{}, "power_on"); r.Code != "CAPABILITY_UNSUPPORTED" {
-		t.Fatal("unverified IPMI supported")
+	ipmi, err := NewIPMI(IPMIConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := ipmi.Execute(context.Background(), Target{}, "power_on"); r.Code != "DEVICE_ACCESS_DISABLED" {
+		t.Fatal("unapproved IPMI enabled")
 	}
 }

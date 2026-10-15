@@ -361,8 +361,8 @@ func TestRuntimePowerApprovalGuards(t *testing.T) {
 	} else if _, ok := d.(*drivers.PiKVM); !ok {
 		t.Fatalf("wrong adapter %T", d)
 	}
-	if len(powerActions("ipmi", "admin")) != 0 {
-		t.Fatal("unverified IPMI capability exposed")
+	if len(powerActions("ipmi", "operator")) != 0 || permitsPower("ipmi", "customer", "hard_power_off") {
+		t.Fatal("IPMI exposed an unauthorized role or unsupported hard cut")
 	}
 }
 func TestRuntimePowerProfileParsing(t *testing.T) {

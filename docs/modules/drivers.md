@@ -50,7 +50,7 @@ denied until separate connection-revocation and isolation evidence is available.
 | Redfish | Administrator discovery of `/redfish/v1/Systems` returns candidates without selecting the first. Explicit `ComputerSystem` binding is mandatory. Supported `ResetType` values come from the bound resource or same-system ActionInfo; action targets cannot escape that system. ON/OFF may establish requested state; reset/cycle remain accepted but unverified. |
 | APC | A confirmed model, firmware and evidence record supplies each outlet's exact state/control OIDs and integer enum mappings. No AP7921B or AP8xxx OID is guessed or built in. Only known supply state is exposed; server power stays unknown. |
 | SNMPv3 | Explicit AuthPriv credentials/algorithms, enrolled literal IP target, access/write gates, zero configured retries and a single-datagram write fence after read-only discovery prevent SET resends even from library engine resynchronization. Errors after a write become unknown. |
-| IPMI | Explicitly unsupported until firmware/transport capabilities are evidenced. No implicit fallback from Redfish, PDU or PiKVM. |
+| IPMI | Guarded ipmitool 1.8.19 subprocess with approved SHA256, literal IP, fixed LANplus/cipher 17, one command attempt and bounded credentials. State precheck, uncertain-write fencing and reset/cycle evidence rules match the scheduler. See [IPMI contract and profile](ipmi.md); no implicit fallback from other adapters. |
 
 APC `SNMPV3Transport.DiscoveryOID` must be a confirmed read-only integer state OID
 from the same firmware profile. Test fixture OIDs under the synthetic 99999 branch
@@ -75,7 +75,8 @@ Executed on 2026-10-15 with the repository's local Go toolchain:
 | --- | --- |
 | `go test ./backend/internal/drivers` | PASS (2.032 seconds) |
 | `go vet ./backend/internal/drivers` | PASS, exit 0 |
-| `go test -race ./backend/internal/drivers` | NOT_RUN: toolchain reports `-race requires cgo`; CGO is disabled on this host |
+| Windows `go test -race ./backend/internal/drivers` | NOT_RUN: this host lacks the required CGO compiler |
+| Linux `go test -race ./...` | PASS in [CI run 38709721860](https://github.com/ygandwx/BarePulse/actions/runs/38709721860), before the IPMI increment; latest verification is recorded in implementation-status |
 
 The integrating task also records these results in `docs/implementation-status.md`.
 Live device validation remains blocked by the authorization and firmware evidence

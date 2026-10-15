@@ -51,9 +51,10 @@ go test ./backend/internal/app -run '^TestWHMCSPHPRealHandlerContract$' -count=1
 | `scripts/verify-whmcs.ps1` | PASS | PHP 8.5.11；7 个 PHP 文件 lint；54 条 stub 断言；HTTP 测试累计 69 条断言（含前述 54 条），不是 123 个独立案例 |
 | `TestWHMCSPHPRealHandlerContract` | PASS | 最新定向执行 1.76s（包 4.304s），17 条 PHP→真实 Go/PG 断言；summary／power／traffic 大整数／幂等 power-actions／task／console，以及错误客户和服务拒绝；数据库核验只有 1 条任务和 1 个控制台会话 |
 | `go test ./backend/internal/app -run '^TestTrafficPGThree' -count=1 -v` | PASS | 三台独立账户 0.94s、三成员共享账户 0.85s，包 4.714s；同 VLAN 主源拒绝重复、精确合计和重放唯一记账均实际检查 |
-| Windows `go test -race` | NOT_RUN | 当前 Windows 工具链没有所需 CGO 编译器；Linux 验证脚本包含 race，执行前不能声称通过 |
-| Linux `scripts/verify-whmcs.sh` | NOT_RUN | 提供同等 lint／stub／HTTP 命令；本次实际执行的是 PowerShell 入口 |
-| Docker Compose、浏览器人工验收、备份恢复演练 | 见实现进度 | 由集成主任务分别记录，不能从单元测试推导 PASS |
+| Windows `go test -race` | NOT_RUN | 当前 Windows 工具链没有所需 CGO 编译器；同一代码的 Linux race 已在 CI 实际通过 |
+| Linux `scripts/verify.sh`、`scripts/verify-whmcs.sh` | PASS | [CI 38709721860](https://github.com/ygandwx/BarePulse/actions/runs/38709721860)，remote 9e60f9e/local 1319414 相同 tree；完整 race（app 255.262s）、PHP/cURL→Go、7文件lint、54/累计69断言 |
+| Docker Compose 构建、迁移、bootstrap、启动及 HTTP 首链 | PASS | 同次 CI 实际执行 `scripts/compose-smoke.sh`；8项首链断言，独立临时项目清理成功。真实访问双开关为 false；IPMI后续增量见最新进度 |
+| 浏览器验收、备份恢复演练 | PASS，见实现进度 | 登录与资产／电源、流量、WHMCS门户／介质／保护／释放均实际操作；原开发库及独立故障fixture恢复另行核验 |
 | 真实 SN2410／VyOS／PiKVM／APC／BMC、授权 WHMCS 实例 | NOT_RUN | 缺少本轮实机／实例授权；继续保持真实访问默认关闭 |
 
 OpenAPI 文件使用 JSON 语法（合法 YAML 1.2 子集），不增加 YAML 解析依赖。检查器为离线结构与代码一致性检查，不冒充完整 OpenAPI 元模式验证器，也不从静态路由覆盖推断实际响应已全部执行。
@@ -68,7 +69,7 @@ OpenAPI 文件使用 JSON 语法（合法 YAML 1.2 子集），不增加 YAML �
 | A02 三台共享额度 | `TestTrafficPGThreeSharedMembersExactReplay`、`TestTrafficPGSharedPortsAndBoundaryHold`、`TestTrafficPGAccountingReplayOwnershipAndAdjustments` | 精确三成员 PG 场景 PASS：upload 606、download 1842、used 2448；每个末样本重放 3 次仍只有 6 个样本／3 条 ledger；三个服务器入口指向同账户，跨客户 404、跨 owner 组建 409。实机完整覆盖范围需授权确认 |
 | A03 重启／中断／ifIndex 变更 | `TestTrafficCounterQualityAndPrecision`、`TestTrafficPGQualitySequenceAndMockCollector`、`TestTrafficPGMemberVersionRefreshKeepsHistory`、`TestTrafficSNMPReadOnlyContract` | 离线 PASS。复位、discontinuity、重映射分别标质量，重新建立基线，不生成巨额或零流量。真实固件 IF-MIB 响应与映射尚未验证 |
 | A04 漏采跨周期／重跑／额度调整 | `TestTrafficCycleBoundaryIsNotInvented`、`TestTrafficPGAccountingReplayOwnershipAndAdjustments`、`TestTrafficPGSharedPortsAndBoundaryHold` | 离线 PASS。重复样本唯一入账，冲突重放拒绝；跨周期差值保留 `boundary_unallocated`，不按时间比例猜分；调整保留原因与幂等键 |
-| A05 电源重复／超时／worker 重启 | `TestPowerIdempotencyOwnershipAndExecution`、`TestPowerUnknownBlocksAndRestartDoesNotReplay`、`TestPowerRecoveryAndDeviceSerialization`、`TestPiKVMTimeoutSentOnce`、`TestSNMPWriteFenceAndValidation` | 离线 PASS。超时为 unknown、保留设备锁且不自动重发；SNMP 写保护禁止库内部重发 SET。实机超时后最终物理状态另需授权观察 |
+| A05 电源重复／超时／worker 重启 | `TestPowerIdempotencyOwnershipAndExecution`、`TestPowerUnknownBlocksAndRestartDoesNotReplay`、`TestPowerRecoveryAndDeviceSerialization`、`TestPiKVMTimeoutSentOnce`、`TestSNMPWriteFenceAndValidation`、`TestRuntimeIPMIDurableDispatchAndRevocation`、`TestIPMIAmbiguousWriteNeverRetriesOrLeaksOutput` | 离线 PASS。超时为 unknown、保留设备锁且不自动重发；SNMP 写保护禁止库内部重发 SET；IPMI 指令一次尝试、审批撤销阻止派发、uncertain任务幂等及阻断。实机超时后最终物理状态另需授权观察 |
 | A06 PiKVM 200 内层失败／缺状态 | `TestPiKVMRejectsInnerFailures`、`TestPiKVMRequestAndCompletion`、`TestPowerMockScenariosAndSupplySemantics` | fixture PASS。HTTP 成功不能替代业务成功；缺失／非法 status、error、res 与返回格式均受检查。定制固件实际响应未调用验证 |
 | A07 排队后绑定／归属变化 | `TestPowerBindingChangeAndDeviceChangeRejectDispatch`、`TestInventoryOwnershipConflictsAndHistory`、`TestSecuritySessionListHidesReassignedAssets` | PG PASS。server/device/binding 版本及客户归属在执行前复核，旧任务不能作用到新目标；历史绑定保留 |
 | A08 同 PiKVM 两客户竞争 | `TestConsoleExclusiveProtectionRestartAndCleanup` | PG/mock PASS。整机唯一占用覆盖所有端口；第二客户排队，第一客户保护期间不切换。真实视频、键鼠和媒体整机隔离尚未验证 |
@@ -85,6 +86,7 @@ OpenAPI 文件使用 JSON 语法（合法 YAML 1.2 子集），不增加 YAML �
 
 - [OpenAPI](../api/openapi.yaml) 和 [离线一致性检查器](../api/check_contract.py)：所有已实现 HTTP 路由与认证方式。
 - [驱动边界](modules/drivers.md)：PiKVM 定制协议、Redfish 能力发现、APC 明确固件 profile、SNMP 写保护及测试事实；不预填未知 OID。
+- [IPMI 源码契约与批准 profile](modules/ipmi.md)：固定 ipmitool 版本与二进制校验、单次尝试、子进程隔离、凭据边界；不以离线 subprocess 测试声称 BMC 已支持。
 - [WHMCS 模块说明](modules/whmcs.md) 与 [安装 README](../integrations/whmcs/README.md)：服务映射、HMAC、客户归属、CSRF、异步结果和短期控制台入口。
 - [运维说明](operations.md)：部署、备份恢复、未知状态人工处理和保护保留。
 - [实现进度／续接检查点](implementation-status.md)：当前分支、最后提交、未提交／未推送内容、准确下一任务与外部阻塞。

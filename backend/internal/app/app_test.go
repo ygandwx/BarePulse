@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -45,10 +46,16 @@ func testApp(t *testing.T) *App {
 	}
 	return New(db, Config{BaseURL: "http://localhost", MediaDir: t.TempDir(), MaxMediaBytes: 1024 * 1024})
 }
+
+// Fixtures all use the same documented test password. Hash it once at the
+// production cost rather than spending most race-test time hashing duplicates.
+// Authentication tests still exercise Bootstrap/login/password verification.
+var fixturePasswordHash = sync.OnceValues(func() (string, error) { return hashPassword("test-password-123!") })
+
 func testUser(t *testing.T, a *App, role string) (User, string, string) {
 	t.Helper()
 	u := User{ID: newID(), Email: newID() + "@example.test", Role: role}
-	h, e := hashPassword("test-password-123!")
+	h, e := fixturePasswordHash()
 	if e != nil {
 		t.Fatal(e)
 	}

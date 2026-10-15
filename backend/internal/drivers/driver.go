@@ -40,10 +40,3 @@ func unsupported() Result {
 func unknown() Result {
 	return outcome("unknown", "OUTCOME_UNKNOWN", "The command outcome is unknown; do not resend automatically")
 }
-
-// IPMI deliberately makes no network call. No particular BMC firmware or IPMI
-// command capability was verified for the installation. Use confirmed Redfish
-// capabilities where available; never silently fall back from another driver.
-type IPMI struct{}
-
-func (IPMI) Execute(context.Context, Target, string) Result { return unsupported() }

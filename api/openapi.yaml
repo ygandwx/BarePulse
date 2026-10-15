@@ -3,7 +3,7 @@
   "info": {
     "title": "BarePulse offline-first management API",
     "version": "0.1.0",
-    "description": "Implemented first-phase contract. Real device access and writes default OFF; mock workflows are executable locally. Credentials never go to browsers. Real power requires both runtime gates, exact approved unexpired file profile and credential references; real console/media remain denied until isolation evidence exists. IPMI is explicitly unsupported. HMAC, session-cookie/CSRF, and portal bearer authentication are separate scopes. State or accepted commands are not proof of physical completion. See docs/offline-acceptance.md for executed evidence and external validation boundaries."
+    "description": "Implemented first-phase contract. Real device access and writes default OFF; mock workflows are executable locally. Credentials never go to browsers. Real power requires both runtime gates, exact approved unexpired file profile and credential references; real console/media remain denied until isolation evidence exists. IPMI additionally requires an approved ipmitool 1.8.19 executable SHA256 and exact action scope. HMAC, session-cookie/CSRF, and portal bearer authentication are separate scopes. State or accepted commands are not proof of physical completion. See docs/offline-acceptance.md for executed evidence and external validation boundaries."
   },
   "servers": [
     {

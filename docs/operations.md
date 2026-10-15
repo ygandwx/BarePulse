@@ -6,7 +6,7 @@ README 给出 Compose 与原生启动命令。迁移必须先执行；`schema_mi
 
 `BASE_URL` 必须精确匹配浏览器入口（含协议/端口），用于 Origin 验证与 WHMCS 门户 URL。生产反向代理终止可信 TLS 时设置 `SECURE_COOKIES=true`，仅向代理开放应用端口；不要关闭证书验证。当前开发 Compose 仅绑定宿主 127.0.0.1。后端从不转发客户端设备认证头。
 
-`ALLOW_REAL_DEVICES=false`、`ALLOW_DEVICE_WRITES=false` 为默认值。录入真实地址不会启用网络访问。电源运行还要求外部 `BAREPULSE_DEVICE_PROFILES_FILE` 中批准的设备/服务器/端口/动作/时间窗与当前绑定一致；缺资料的 APC OID 和枚举绝不提供猜测默认值。即使代码支持某驱动，本次任务也没有授权打开这些开关。IPMI 与未知的真实控制台媒体路径保持 unsupported/blocked。
+`ALLOW_REAL_DEVICES=false`、`ALLOW_DEVICE_WRITES=false` 为默认值。录入真实地址不会启用网络访问。电源运行还要求外部 `BAREPULSE_DEVICE_PROFILES_FILE` 中批准的设备/服务器/端口/动作/时间窗与当前绑定一致；缺资料的 APC OID 和枚举绝不提供猜测默认值。即使代码支持某驱动，本次任务也没有授权打开这些开关。IPMI 另需[固定版本客户端及 SHA256 审批](modules/ipmi.md)，容器虽安装客户端但没有默认授权或凭据；未知的真实控制台媒体路径保持 blocked。
 
 设备与集成秘密不放数据库：电源 profile 文件和 SNMP/WHMCS 环境变量由部署者保管，权限限制为服务账号可读，备份与数据库分开加密。`credential_ref` 只表示引用。公开仓库只含示例和测试密钥，不应提交真实内容。
 

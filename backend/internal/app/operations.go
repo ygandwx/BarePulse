@@ -38,6 +38,14 @@ type PowerProfile struct {
 	RedfishSystemPath      string              `json:"redfish_system_path"`
 	APC                    *drivers.APCProfile `json:"apc_profile"`
 	SNMP                   *PowerSNMPProfile   `json:"snmp_v3"`
+	IPMI                   *PowerIPMIProfile   `json:"ipmi_profile"`
+}
+type PowerIPMIProfile struct {
+	BinaryPath    string `json:"binary_path"`
+	BinarySHA256  string `json:"binary_sha256"`
+	ClientVersion string `json:"client_version"`
+	UDPPort       uint16 `json:"udp_port"`
+	Privilege     string `json:"privilege"`
 }
 type PowerSNMPProfile struct {
 	AuthProtocol    string `json:"auth_protocol"`
@@ -89,6 +97,15 @@ func (a *App) powerProfile(target drivers.Target, serverID, action, reference st
 		return zero, fail(409, "DEVICE_CREDENTIALS_REQUIRED", "Device credentials are unavailable")
 	}
 	switch p.Kind {
+	case "ipmi":
+		if target.Port != 1 || len(p.Username) > 16 || len(p.Password) < 1 || len(p.Password) > 20 || strings.ContainsAny(p.Username+p.Password, "\x00\r\n") {
+			return zero, fail(409, "DEVICE_PROFILE_INVALID", "IPMI requires BMC port 1 and bounded server-owned credentials")
+		}
+		// Constructor validation is local and does not run the client or contact
+		// a BMC. Executable integrity and version are checked before dispatch.
+		if _, err := configuredIPMI(p); err != nil {
+			return zero, err
+		}
 	case "pikvm", "redfish":
 		u, err := url.Parse(p.Endpoint)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || p.Password == "" {
@@ -132,6 +149,21 @@ func (a *App) powerProfile(target drivers.Target, serverID, action, reference st
 	}
 	return p, nil
 }
+func configuredIPMI(p PowerProfile) (drivers.Driver, error) {
+	if p.IPMI == nil {
+		return nil, fail(409, "DEVICE_PROFILE_INVALID", "IPMI requires an approved client profile")
+	}
+	d, err := drivers.NewIPMI(drivers.IPMIConfig{
+		AllowReal: true, AllowWrites: true, DeviceID: p.DeviceID, Address: p.Endpoint,
+		Approved: p.Approved, Evidence: p.Evidence, AuthorizationExpiresAt: p.AuthorizationExpiresAt,
+		AllowedActions: p.AllowedActions, BinaryPath: p.IPMI.BinaryPath, BinarySHA256: p.IPMI.BinarySHA256,
+		ClientVersion: p.IPMI.ClientVersion, UDPPort: p.IPMI.UDPPort, Privilege: p.IPMI.Privilege, Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		return nil, fail(409, "DEVICE_PROFILE_INVALID", "IPMI requires an exact approved IP, client version, binary checksum and action scope")
+	}
+	return d, nil
+}
 func snmpPowerAlgorithms(p *PowerSNMPProfile) (gosnmp.SnmpV3AuthProtocol, gosnmp.SnmpV3PrivProtocol, error) {
 	if p == nil {
 		return 0, 0, fail(409, "DEVICE_PROFILE_INVALID", "SNMPv3 profile is required")
@@ -153,6 +185,8 @@ func configuredPowerDriver(p PowerProfile) (drivers.Driver, error) {
 		policy = drivers.NetworkPolicy{AllowReal: true, AllowWrite: true, AllowedHosts: []string{u.Host}}
 	}
 	switch p.Kind {
+	case "ipmi":
+		return configuredIPMI(p)
 	case "pikvm":
 		return drivers.NewPiKVM(drivers.PiKVMConfig{Network: policy, Timeout: 5 * time.Second, MappingVerified: p.MappingVerified}), nil
 	case "redfish":
@@ -207,7 +241,7 @@ func powerActions(kind, role string) []string {
 	switch kind {
 	case "mock_pikvm", "pikvm":
 		actions = []string{"power_on", "request_shutdown", "hard_reset"}
-	case "mock_bmc", "redfish":
+	case "mock_bmc", "redfish", "ipmi":
 		actions = []string{"power_on", "request_shutdown", "hard_reset", "power_cycle"}
 	case "mock_pdu", "apc":
 		actions = []string{"power_on", "power_cycle"}
