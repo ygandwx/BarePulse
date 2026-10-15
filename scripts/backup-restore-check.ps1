@@ -154,7 +154,7 @@ function Assert-MediaMatchesDatabase($Manifest, $Files) {
 $tables = @(
     'schema_migrations', 'users', 'auth_sessions', 'servers', 'devices', 'bindings',
     'operation_tasks', 'audit_events', 'traffic_accounts', 'traffic_members', 'traffic_sources',
-    'traffic_samples', 'traffic_ledger', 'traffic_adjustments', 'traffic_alerts',
+    'traffic_source_members', 'traffic_samples', 'traffic_ledger', 'traffic_adjustments', 'traffic_alerts',
     'console_sessions', 'console_tickets', 'console_access', 'media_assets',
     'mock_console_state', 'gateway_connections', 'integrations', 'service_mappings',
     'integration_nonces', 'portal_grants'

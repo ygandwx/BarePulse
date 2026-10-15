@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -29,23 +30,24 @@ type TrafficAccount struct {
 }
 
 type TrafficSource struct {
-	ID              string `json:"id"`
-	AccountID       string `json:"account_id"`
-	DeviceID        string `json:"device_id"`
-	BindingID       string `json:"binding_id"`
-	BindingVersion  int64  `json:"binding_version"`
-	Kind            string `json:"kind"`
-	Role            string `json:"role"`
-	NetworkDomain   string `json:"network_domain"`
-	VLANID          int    `json:"vlan_id"`
-	IfName          string `json:"if_name"`
-	ExpectedIfIndex int    `json:"expected_if_index"`
-	Direction       string `json:"direction"`
-	IntervalSeconds int    `json:"interval_seconds"`
-	MaxBPS          string `json:"max_bps"`
-	Mock            bool   `json:"mock"`
-	AutoCollect     bool   `json:"auto_collect"`
-	Active          bool   `json:"active"`
+	ID              string   `json:"id"`
+	AccountID       string   `json:"account_id"`
+	DeviceID        string   `json:"device_id"`
+	BindingID       string   `json:"binding_id"`
+	BindingVersion  int64    `json:"binding_version"`
+	Kind            string   `json:"kind"`
+	Role            string   `json:"role"`
+	NetworkDomain   string   `json:"network_domain"`
+	VLANID          int      `json:"vlan_id"`
+	IfName          string   `json:"if_name"`
+	ExpectedIfIndex int      `json:"expected_if_index"`
+	Direction       string   `json:"direction"`
+	IntervalSeconds int      `json:"interval_seconds"`
+	MaxBPS          string   `json:"max_bps"`
+	Mock            bool     `json:"mock"`
+	AutoCollect     bool     `json:"auto_collect"`
+	Active          bool     `json:"active"`
+	VLANMemberIDs   []string `json:"vlan_member_ids,omitempty"`
 }
 
 type TrafficSample struct {
@@ -196,6 +198,8 @@ func (a *App) registerTraffic() {
 	a.route("GET /api/v1/traffic/accounts/{id}", false, a.getTrafficAccount)
 	a.route("GET /api/v1/servers/{id}/traffic", false, a.getServerTraffic)
 	a.route("DELETE /api/v1/traffic/accounts/{id}", true, a.retireTrafficAccount)
+	a.route("POST /api/v1/traffic/accounts/{id}/members", true, a.addTrafficMember)
+	a.route("DELETE /api/v1/traffic/accounts/{id}/members/{server_id}", true, a.removeTrafficMember)
 	a.route("POST /api/v1/traffic/accounts/{id}/members/{server_id}/refresh", true, a.refreshTrafficMember)
 	a.route("POST /api/v1/traffic/accounts/{id}/adjustments", true, a.adjustTrafficAccount)
 	a.route("POST /api/v1/traffic/sources", true, a.createTrafficSource)
@@ -212,6 +216,17 @@ func trafficScanAccount(row pgx.Row) (TrafficAccount, error) {
 
 const trafficAccountCols = `id,name,owner_id,quota_bytes::text,direction,cycle_day,timezone,alert_percent,enforcement_enabled`
 const trafficSourceCols = `id,account_id,device_id,COALESCE(binding_id,''),binding_version,kind,role,network_domain,vlan_id,if_name,expected_if_index,direction,interval_seconds,max_bps::text,mock,auto_collect,active`
+
+// Acquire before source/account/server row locks. Collection shares this lock;
+// topology changes exclude collection while coverage and membership are changed.
+func trafficTopologyLock(ctx context.Context, tx pgx.Tx, write bool) error {
+	query := `SELECT pg_advisory_xact_lock_shared(834920114)`
+	if write {
+		query = `SELECT pg_advisory_xact_lock(834920114)`
+	}
+	_, err := tx.Exec(ctx, query)
+	return err
+}
 
 func trafficScanSource(row pgx.Row) (TrafficSource, error) {
 	var s TrafficSource
@@ -298,6 +313,9 @@ func (a *App) createTrafficAccount(w http.ResponseWriter, r *http.Request, u Use
 		return err
 	}
 	defer tx.Rollback(r.Context())
+	if err = trafficTopologyLock(r.Context(), tx, true); err != nil {
+		return err
+	}
 	id := newID()
 	if _, err = tx.Exec(r.Context(), `INSERT INTO traffic_accounts(id,name,owner_id,quota_bytes,direction,cycle_day,timezone,alert_percent) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, id, b.Name, b.OwnerID, b.QuotaBytes, b.Direction, b.CycleDay, b.Timezone, b.AlertPercent); err != nil {
 		return dbError(err)
@@ -337,8 +355,7 @@ func (a *App) createTrafficAccount(w http.ResponseWriter, r *http.Request, u Use
 func (a *App) createTrafficSource(w http.ResponseWriter, r *http.Request, u User) error {
 	var b struct {
 		TrafficSource
-		VLANMemberIDs     []string `json:"vlan_member_ids"`
-		CoverageConfirmed bool     `json:"coverage_confirmed"`
+		CoverageConfirmed bool `json:"coverage_confirmed"`
 	}
 	if err := decode(r, &b); err != nil {
 		return err
@@ -366,13 +383,14 @@ func (a *App) createTrafficSource(w http.ResponseWriter, r *http.Request, u User
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(834920114)`); err != nil {
+	if err = trafficTopologyLock(r.Context(), tx, true); err != nil {
 		return err
 	}
 	ac, err := trafficScanAccount(tx.QueryRow(r.Context(), `SELECT `+trafficAccountCols+` FROM traffic_accounts WHERE id=$1 FOR UPDATE`, b.AccountID))
 	if err != nil {
 		return dbError(err)
 	}
+	coverageVersions := map[string]int64{}
 	if b.Kind == "port" {
 		var device, owner, sid string
 		var version, serverVersion, memberVersion int64
@@ -386,12 +404,13 @@ func (a *App) createTrafficSource(w http.ResponseWriter, r *http.Request, u User
 		}
 		b.DeviceID = device
 		b.BindingVersion = version
+		b.VLANMemberIDs = nil
 	} else {
 		b.BindingVersion = 0
 		if b.BindingID != "" {
 			return fail(400, "invalid_binding", "VLAN sources do not select a single server binding")
 		}
-		if !b.CoverageConfirmed || len(b.VLANMemberIDs) == 0 {
+		if !b.CoverageConfirmed || len(b.VLANMemberIDs) == 0 || len(b.VLANMemberIDs) > 100 {
 			return fail(400, "coverage_required", "VLAN collection requires an explicitly confirmed complete server membership")
 		}
 		rows, e := tx.Query(r.Context(), `SELECT m.server_id FROM traffic_members m JOIN servers s ON s.id=m.server_id WHERE m.account_id=$1 AND m.active AND s.owner_id=$2 AND m.server_version=s.version`, b.AccountID, ac.OwnerID)
@@ -412,22 +431,35 @@ func (a *App) createTrafficSource(w http.ResponseWriter, r *http.Request, u User
 		if e != nil {
 			return e
 		}
-		if len(members) != len(b.VLANMemberIDs) {
+		if b.Role == "primary" && len(members) != len(b.VLANMemberIDs) {
 			return fail(409, "coverage_mismatch", "VLAN membership must exactly match this account")
 		}
+		sort.Strings(b.VLANMemberIDs)
 		for _, sid := range b.VLANMemberIDs {
-			if !members[sid] {
+			if b.Role == "primary" && !members[sid] {
 				return fail(409, "coverage_mismatch", "VLAN contains an unknown or other-account server")
 			}
 			delete(members, sid)
+			if _, exists := coverageVersions[sid]; exists {
+				return fail(400, "duplicate_member", "VLAN coverage contains a duplicate server")
+			}
+			var owner string
+			var version int64
+			if e = tx.QueryRow(r.Context(), `SELECT owner_id,version FROM servers WHERE id=$1 FOR SHARE`, sid).Scan(&owner, &version); e != nil {
+				return fail(409, "coverage_mismatch", "VLAN contains an unknown server")
+			}
+			if owner != ac.OwnerID {
+				return fail(409, "ownership_mismatch", "VLAN observations cannot include another customer's servers")
+			}
+			coverageVersions[sid] = version
 		}
 		var outside bool
-		err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM traffic_sources s WHERE s.active AND s.kind='port' AND s.network_domain=$1 AND s.vlan_id=$2 AND s.account_id<>$3)`, b.NetworkDomain, b.VLANID, b.AccountID).Scan(&outside)
+		err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM traffic_sources src JOIN bindings binding ON binding.id=src.binding_id JOIN servers srv ON srv.id=binding.server_id WHERE src.active AND src.kind='port' AND src.network_domain=$1 AND src.vlan_id=$2 AND (NOT(srv.id=ANY($4::text[])) OR srv.owner_id<>$5 OR ($6='primary' AND src.account_id<>$3)))`, b.NetworkDomain, b.VLANID, b.AccountID, b.VLANMemberIDs, ac.OwnerID, b.Role).Scan(&outside)
 		if err != nil {
 			return err
 		}
 		if outside {
-			return fail(409, "vlan_contains_other_account", "Known VLAN ports include another traffic account")
+			return fail(409, "vlan_contains_other_account", "Known VLAN ports are outside confirmed customer/account coverage")
 		}
 	}
 	var kind string
@@ -442,6 +474,11 @@ func (a *App) createTrafficSource(w http.ResponseWriter, r *http.Request, u User
 	_, err = tx.Exec(r.Context(), `INSERT INTO traffic_sources(id,account_id,device_id,binding_id,binding_version,kind,role,network_domain,vlan_id,if_name,expected_if_index,direction,interval_seconds,max_bps,mock,auto_collect) VALUES($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, b.ID, b.AccountID, b.DeviceID, b.BindingID, b.BindingVersion, b.Kind, b.Role, b.NetworkDomain, b.VLANID, b.IfName, b.ExpectedIfIndex, b.Direction, b.IntervalSeconds, b.MaxBPS, b.Mock, b.AutoCollect)
 	if err != nil {
 		return dbError(err)
+	}
+	for _, sid := range b.VLANMemberIDs {
+		if _, err = tx.Exec(r.Context(), `INSERT INTO traffic_source_members(source_id,server_id,server_version) VALUES($1,$2,$3)`, b.ID, sid, coverageVersions[sid]); err != nil {
+			return err
+		}
 	}
 	if err = audit(r.Context(), tx, u, "traffic.source.create", b.ID, b); err != nil {
 		return err
@@ -459,6 +496,9 @@ func (a *App) retireTrafficSource(w http.ResponseWriter, r *http.Request, u User
 		return err
 	}
 	defer tx.Rollback(r.Context())
+	if err = trafficTopologyLock(r.Context(), tx, true); err != nil {
+		return err
+	}
 	res, err := tx.Exec(r.Context(), `UPDATE traffic_sources SET active=false,ended_at=now(),auto_collect=false WHERE id=$1 AND active`, r.PathValue("id"))
 	if err != nil {
 		return err
@@ -592,7 +632,13 @@ func (a *App) ingestTrafficSample(w http.ResponseWriter, r *http.Request, u User
 }
 
 func trafficSourceValid(ctx context.Context, tx pgx.Tx, s TrafficSource, owner string) error {
-	rows, err := tx.Query(ctx, `SELECT m.server_version,s.version,s.owner_id FROM traffic_members m JOIN servers s ON s.id=m.server_id WHERE m.account_id=$1 AND m.active ORDER BY s.id FOR SHARE OF m,s`, s.AccountID)
+	query := `SELECT m.server_version,s.version,s.owner_id FROM traffic_members m JOIN servers s ON s.id=m.server_id WHERE m.account_id=$1 AND m.active ORDER BY s.id FOR SHARE OF m,s`
+	id := s.AccountID
+	if s.Kind == "vlan" {
+		query = `SELECT m.server_version,s.version,s.owner_id FROM traffic_source_members m JOIN servers s ON s.id=m.server_id WHERE m.source_id=$1 ORDER BY s.id FOR SHARE OF m,s`
+		id = s.ID
+	}
+	rows, err := tx.Query(ctx, query, id)
 	if err != nil {
 		return err
 	}
@@ -617,7 +663,7 @@ func trafficSourceValid(ctx context.Context, tx pgx.Tx, s TrafficSource, owner s
 		return fail(409, "membership_changed", "Account membership or server ownership/version has changed; source is blocked")
 	}
 	if s.BindingID != "" {
-		err = tx.QueryRow(ctx, `SELECT b.active AND b.version=$2 AND b.device_id=$3 AND b.kind='network' AND m.active FROM bindings b JOIN traffic_members m ON m.server_id=b.server_id AND m.account_id=$4 WHERE b.id=$1 FOR SHARE OF b`, s.BindingID, s.BindingVersion, s.DeviceID, s.AccountID).Scan(&valid)
+		err = tx.QueryRow(ctx, `SELECT b.active AND b.version=$2 AND b.device_id=$3 AND b.kind='network' FROM bindings b JOIN traffic_members m ON m.server_id=b.server_id AND m.account_id=$4 AND m.active WHERE b.id=$1 FOR SHARE OF b`, s.BindingID, s.BindingVersion, s.DeviceID, s.AccountID).Scan(&valid)
 		if errors.Is(err, pgx.ErrNoRows) {
 			valid = false
 		} else if err != nil {
@@ -641,6 +687,9 @@ func (a *App) recordTrafficSample(ctx context.Context, sourceID string, s Traffi
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	if err = trafficTopologyLock(ctx, tx, false); err != nil {
+		return nil, err
+	}
 	src, err := trafficScanSource(tx.QueryRow(ctx, `SELECT `+trafficSourceCols+` FROM traffic_sources WHERE id=$1 FOR UPDATE`, sourceID))
 	if err != nil {
 		return nil, dbError(err)
@@ -787,10 +836,6 @@ func (a *App) getTrafficAccount(w http.ResponseWriter, r *http.Request, u User) 
 	next := trafficNextPeriod(period, ac)
 	var upload, download, adjusted, pendingUp, pendingDown string
 	var knownIntervals, unknownIntervals int
-	err = a.DB.QueryRow(r.Context(), `SELECT COUNT(*) FILTER(WHERE billable),COUNT(*) FILTER(WHERE quality NOT IN ('normal','recovered_gap')) FROM traffic_ledger WHERE account_id=$1 AND ends_at>$2 AND starts_at<$3`, ac.ID, period, next).Scan(&knownIntervals, &unknownIntervals)
-	if err != nil {
-		return err
-	}
 	err = a.DB.QueryRow(r.Context(), `SELECT COALESCE(SUM(upload_bytes) FILTER(WHERE billable AND period_start=$2),0)::text,COALESCE(SUM(download_bytes) FILTER(WHERE billable AND period_start=$2),0)::text,COALESCE(SUM(upload_bytes) FILTER(WHERE quality='boundary_unallocated' AND source_id IN(SELECT id FROM traffic_sources WHERE role='primary') AND ends_at>$2 AND starts_at<$3),0)::text,COALESCE(SUM(download_bytes) FILTER(WHERE quality='boundary_unallocated' AND source_id IN(SELECT id FROM traffic_sources WHERE role='primary') AND ends_at>$2 AND starts_at<$3),0)::text FROM traffic_ledger WHERE account_id=$1`, ac.ID, period, next).Scan(&upload, &download, &pendingUp, &pendingDown)
 	if err != nil {
 		return err
@@ -814,7 +859,8 @@ func (a *App) getTrafficAccount(w http.ResponseWriter, r *http.Request, u User) 
 		remaining.SetInt64(0)
 	}
 	sources := []TrafficSource{}
-	rows, err := a.DB.Query(r.Context(), `SELECT `+trafficSourceCols+` FROM traffic_sources WHERE account_id=$1 ORDER BY created_at`, ac.ID)
+	visibleSourceIDs := []string{}
+	rows, err := a.DB.Query(r.Context(), `SELECT `+trafficSourceCols+` FROM traffic_sources WHERE account_id=$1 AND ($2 OR kind<>'vlan' OR role<>'observation' OR (EXISTS(SELECT 1 FROM traffic_source_members m WHERE m.source_id=traffic_sources.id) AND NOT EXISTS(SELECT 1 FROM traffic_source_members m JOIN servers srv ON srv.id=m.server_id WHERE m.source_id=traffic_sources.id AND (srv.owner_id<>$3 OR srv.version<>m.server_version)))) ORDER BY created_at`, ac.ID, u.Role == "admin" || u.Role == "operator", ac.OwnerID)
 	if err != nil {
 		return err
 	}
@@ -825,14 +871,40 @@ func (a *App) getTrafficAccount(w http.ResponseWriter, r *http.Request, u User) 
 			return e
 		}
 		sources = append(sources, s)
+		visibleSourceIDs = append(visibleSourceIDs, s.ID)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return err
 	}
+	rows, err = a.DB.Query(r.Context(), `SELECT source_id,server_id FROM traffic_source_members WHERE source_id=ANY($1::text[]) ORDER BY server_id`, visibleSourceIDs)
+	if err != nil {
+		return err
+	}
+	coverage := map[string][]string{}
+	for rows.Next() {
+		var source, server string
+		if err = rows.Scan(&source, &server); err != nil {
+			rows.Close()
+			return err
+		}
+		coverage[source] = append(coverage[source], server)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for i := range sources {
+		sources[i].VLANMemberIDs = coverage[sources[i].ID]
+	}
+	err = a.DB.QueryRow(r.Context(), `SELECT COUNT(*) FILTER(WHERE billable),COUNT(*) FILTER(WHERE quality NOT IN ('normal','recovered_gap')) FROM traffic_ledger WHERE account_id=$1 AND ends_at>$2 AND starts_at<$3 AND source_id=ANY($4::text[])`, ac.ID, period, next, visibleSourceIDs).Scan(&knownIntervals, &unknownIntervals)
+	if err != nil {
+		return err
+	}
 	intervals := []TrafficInterval{}
-	rows, err = a.DB.Query(r.Context(), `SELECT source_id,starts_at,ends_at,period_start,upload_bytes::text,download_bytes::text,quality,billable FROM traffic_ledger WHERE account_id=$1 AND ends_at>$2 AND starts_at<$3 ORDER BY ends_at DESC LIMIT 2000`, ac.ID, period, next)
+	rows, err = a.DB.Query(r.Context(), `SELECT source_id,starts_at,ends_at,period_start,upload_bytes::text,download_bytes::text,quality,billable FROM traffic_ledger WHERE account_id=$1 AND ends_at>$2 AND starts_at<$3 AND source_id=ANY($4::text[]) ORDER BY ends_at DESC LIMIT 2000`, ac.ID, period, next, visibleSourceIDs)
 	if err != nil {
 		return err
 	}
@@ -850,7 +922,7 @@ func (a *App) getTrafficAccount(w http.ResponseWriter, r *http.Request, u User) 
 		return err
 	}
 	samples := []map[string]any{}
-	rows, err = a.DB.Query(r.Context(), `SELECT s.source_id,s.observed_at,s.quality,s.error_code FROM traffic_samples s JOIN traffic_sources src ON src.id=s.source_id WHERE src.account_id=$1 ORDER BY s.observed_at DESC LIMIT 100`, ac.ID)
+	rows, err = a.DB.Query(r.Context(), `SELECT source_id,observed_at,quality,error_code FROM traffic_samples WHERE source_id=ANY($1::text[]) ORDER BY observed_at DESC LIMIT 100`, visibleSourceIDs)
 	if err != nil {
 		return err
 	}
@@ -915,6 +987,7 @@ func (a *App) getTrafficAccount(w http.ResponseWriter, r *http.Request, u User) 
 			sources[i].ExpectedIfIndex = 0
 			sources[i].NetworkDomain = ""
 			sources[i].VLANID = 0
+			sources[i].VLANMemberIDs = nil
 		}
 	}
 	jsonResponse(w, 200, map[string]any{"account": ac, "period_start": period, "period_end": next, "upload_bytes": upload, "download_bytes": download, "used_bytes": used.String(), "effective_quota_bytes": adjusted, "remaining_bytes": remaining.String(), "over_quota": used.Cmp(quota) > 0, "unallocated_upload_bytes": pendingUp, "unallocated_download_bytes": pendingDown, "sources": sources, "members": members, "intervals": intervals, "samples": samples, "alerts": alerts, "chart_limit": 2000, "enforcement_enabled": false, "known_intervals": knownIntervals, "unknown_intervals": unknownIntervals, "coverage_note": "Totals include confirmed intervals only; missing data is not zero and full billing-period coverage is not assumed"})
@@ -963,6 +1036,9 @@ func (a *App) retireTrafficAccount(w http.ResponseWriter, r *http.Request, u Use
 		return err
 	}
 	defer tx.Rollback(r.Context())
+	if err = trafficTopologyLock(r.Context(), tx, true); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(r.Context(), `UPDATE traffic_sources SET active=false,ended_at=now(),auto_collect=false WHERE account_id=$1 AND active`, ac.ID); err != nil {
 		return err
 	}
@@ -991,6 +1067,9 @@ func (a *App) refreshTrafficMember(w http.ResponseWriter, r *http.Request, u Use
 		return err
 	}
 	defer tx.Rollback(r.Context())
+	if err = trafficTopologyLock(r.Context(), tx, true); err != nil {
+		return err
+	}
 	// Lock sources before the account, matching the ingestion order.
 	if _, err = tx.Exec(r.Context(), `UPDATE traffic_sources SET active=false,ended_at=now(),auto_collect=false WHERE account_id=$1 AND active AND (kind='vlan' OR binding_id IN(SELECT id FROM bindings WHERE server_id=$2))`, ac.ID, r.PathValue("server_id")); err != nil {
 		return err
@@ -1014,5 +1093,123 @@ func (a *App) refreshTrafficMember(w http.ResponseWriter, r *http.Request, u Use
 		return err
 	}
 	jsonResponse(w, 200, map[string]bool{"refreshed": true, "sources_retired": true})
+	return nil
+}
+
+func (a *App) addTrafficMember(w http.ResponseWriter, r *http.Request, u User) error {
+	var b struct {
+		ServerID      string `json:"server_id"`
+		ServerVersion int64  `json:"server_version"`
+		Reason        string `json:"reason"`
+	}
+	if err := decode(r, &b); err != nil {
+		return err
+	}
+	if b.ServerID == "" || b.ServerVersion < 1 || strings.TrimSpace(b.Reason) == "" || len(b.Reason) > 500 {
+		return fail(400, "invalid_member", "Server, current version and a 1–500 UTF-8 byte reason are required")
+	}
+	tx, err := a.DB.Begin(r.Context())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	if err = trafficTopologyLock(r.Context(), tx, true); err != nil {
+		return err
+	}
+	ac, err := trafficScanAccount(tx.QueryRow(r.Context(), `SELECT `+trafficAccountCols+` FROM traffic_accounts WHERE id=$1 FOR UPDATE`, r.PathValue("id")))
+	if err != nil {
+		return dbError(err)
+	}
+	var owner string
+	var version int64
+	if err = tx.QueryRow(r.Context(), `SELECT owner_id,version FROM servers WHERE id=$1 FOR UPDATE`, b.ServerID).Scan(&owner, &version); err != nil {
+		return dbError(err)
+	}
+	if owner != ac.OwnerID {
+		return fail(409, "ownership_mismatch", "Members must have the same owner as the traffic account")
+	}
+	if version != b.ServerVersion {
+		return fail(409, "membership_changed", "Reload the server before confirming membership")
+	}
+	var existing string
+	err = tx.QueryRow(r.Context(), `SELECT account_id FROM traffic_members WHERE server_id=$1 AND active`, b.ServerID).Scan(&existing)
+	if err == nil {
+		return fail(409, "active_member", "Server already belongs to an active traffic account")
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	var count int
+	if err = tx.QueryRow(r.Context(), `SELECT count(*) FROM traffic_members WHERE account_id=$1 AND active`, ac.ID).Scan(&count); err != nil {
+		return err
+	}
+	if count >= 100 {
+		return fail(409, "member_limit", "Traffic accounts support at most 100 active members")
+	}
+	// A new member changes complete VLAN coverage. Reconfirm it in a new source;
+	// existing per-port baselines and historical ledger entries remain unchanged.
+	if _, err = tx.Exec(r.Context(), `UPDATE traffic_sources SET active=false,ended_at=now(),auto_collect=false WHERE account_id=$1 AND active AND kind='vlan'`, ac.ID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(r.Context(), `INSERT INTO traffic_members(account_id,server_id,server_version) VALUES($1,$2,$3)`, ac.ID, b.ServerID, version); err != nil {
+		return dbError(err)
+	}
+	if err = audit(r.Context(), tx, u, "traffic.member.add", b.ServerID, map[string]any{"account_id": ac.ID, "server_version": version, "reason": b.Reason, "history_preserved": true}); err != nil {
+		return err
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		return dbError(err)
+	}
+	jsonResponse(w, 201, map[string]any{"account_id": ac.ID, "server_id": b.ServerID, "server_version": version, "changed": true})
+	return nil
+}
+
+func (a *App) removeTrafficMember(w http.ResponseWriter, r *http.Request, u User) error {
+	var b struct {
+		Reason string `json:"reason"`
+	}
+	if err := decode(r, &b); err != nil {
+		return err
+	}
+	if strings.TrimSpace(b.Reason) == "" || len(b.Reason) > 500 {
+		return fail(400, "invalid_member", "A 1–500 UTF-8 byte reason is required")
+	}
+	tx, err := a.DB.Begin(r.Context())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	if err = trafficTopologyLock(r.Context(), tx, true); err != nil {
+		return err
+	}
+	var account string
+	if err = tx.QueryRow(r.Context(), `SELECT id FROM traffic_accounts WHERE id=$1 FOR UPDATE`, r.PathValue("id")).Scan(&account); err != nil {
+		return dbError(err)
+	}
+	server := r.PathValue("server_id")
+	var id int64
+	var active bool
+	if err = tx.QueryRow(r.Context(), `SELECT id,active FROM traffic_members WHERE account_id=$1 AND server_id=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE`, account, server).Scan(&id, &active); err != nil {
+		return dbError(err)
+	}
+	if !active {
+		jsonResponse(w, 200, map[string]bool{"removed": true, "changed": false, "history_preserved": true})
+		return nil
+	}
+	// Retire account-wide VLAN totals and any cross-account observation that
+	// covered the departing server. A new source needs a fresh baseline.
+	if _, err = tx.Exec(r.Context(), `UPDATE traffic_sources SET active=false,ended_at=now(),auto_collect=false WHERE active AND ((account_id=$1 AND (kind='vlan' OR binding_id IN(SELECT id FROM bindings WHERE server_id=$2))) OR id IN(SELECT source_id FROM traffic_source_members WHERE server_id=$2))`, account, server); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE traffic_members SET active=false,ended_at=now() WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if err = audit(r.Context(), tx, u, "traffic.member.remove", server, map[string]any{"account_id": account, "reason": b.Reason, "history_preserved": true}); err != nil {
+		return err
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		return dbError(err)
+	}
+	jsonResponse(w, 200, map[string]bool{"removed": true, "changed": true, "history_preserved": true})
 	return nil
 }

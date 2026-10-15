@@ -52,6 +52,7 @@ API 契约执行 `python3 api/check_contract.py`（Windows 用已安装的 Pytho
 | [实现进度与续接记录](docs/implementation-status.md) | 阶段状态、测试证据、阻塞与下一条任务 |
 | [离线验收矩阵](docs/offline-acceptance.md) | A01–A16 对应代码、实际测试和实机边界 |
 | [OpenAPI 3.1](api/openapi.yaml) | 当前 HTTP 接口、认证与错误契约 |
+| [电源驱动](docs/modules/drivers.md) / [IPMI](docs/modules/ipmi.md) | 真实访问默认关闭、精确设备授权、协议证据、结果语义和离线测试 |
 | [Codex 启动提示词](docs/codex-start-prompt.md) | 可复制的持续编码任务指令 |
 | [开发计划](docs/development-plan.md) | 已确认需求、约 30 台服务器的设备基线、流量核算、电源驱动、共享控制台、数据模型、API、WHMCS 对接、开发阶段与验收标准 |
 | [定制 16 口 PiKVM 接入细节](docs/pikvm-integration.md) | 手册与 kvmd 3.142 源码排查、接口映射、返回值、鉴权、Nginx 路由、共享媒体隔离及待验证项 |

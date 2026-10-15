@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gosnmp/gosnmp"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/ygandwx/BarePulse/backend/migrations"
 )
 
 func trafficTestTime() time.Time {
@@ -717,5 +721,345 @@ func TestTrafficPGThreeSharedMembersExactReplay(t *testing.T) {
 	}
 	if samples != 6 || ledger != 3 {
 		t.Fatalf("repeated three-server collection duplicated accounting: samples=%d ledger=%d", samples, ledger)
+	}
+}
+
+func TestTrafficPGMemberTransferKeepsSharedPeriod(t *testing.T) {
+	f, servers, bindings := trafficThreeServers(t)
+	r := testRequest(t, f.a, "POST", "/api/v1/traffic/accounts", map[string]any{"name": "Shared lifecycle", "owner_id": f.owner.ID, "quota_bytes": "1000000000000", "direction": "both", "server_ids": servers}, f.admin)
+	f.account = trafficResponseID(t, r, 201)
+	sources := make([]string, 3)
+	for i := range servers {
+		sources[i] = trafficThreePortSource(t, f, bindings[i], 7+i)
+		trafficThreePortSamples(t, f, sources[i], i, false)
+	}
+	at := trafficTestTime()
+	period := trafficPeriod(at, TrafficAccount{CycleDay: 1, Timezone: "UTC"})
+	r = testRequest(t, f.a, "POST", "/api/v1/traffic/accounts/"+f.account+"/adjustments", map[string]any{"bytes": "500", "reason": "Retain existing quota adjustment", "period_start": period, "idempotency_key": "lifecycle-adjustment"}, f.admin)
+	trafficResponseID(t, r, 201)
+	ctx := context.Background()
+	if _, err := f.a.DB.Exec(ctx, `UPDATE servers SET owner_id=$2,version=version+1 WHERE id=$1`, servers[2], f.other.ID); err != nil {
+		t.Fatal(err)
+	}
+	request := "/api/v1/traffic/accounts/" + f.account + "/members/" + servers[2]
+	r = testRequest(t, f.a, "DELETE", request, map[string]string{"reason": "Transferred service leaves shared quota"}, f.owner)
+	if r.Code != 403 {
+		t.Fatalf("customer changed membership: %d %s", r.Code, r.Body)
+	}
+	blocked := trafficTestSample(at.Add(2*time.Minute), "blocked-before-exit", "9007199254741194", "18014398509482493")
+	blocked.Uptime = "22000"
+	if _, err := f.a.recordTrafficSample(ctx, sources[0], blocked, &f.admin, true); err == nil {
+		t.Fatal("transfer did not stop old account before explicit removal")
+	}
+	for i := 0; i < 2; i++ {
+		r = testRequest(t, f.a, "DELETE", request, map[string]string{"reason": "Transferred service leaves shared quota"}, f.admin)
+		if r.Code != 200 || !strings.Contains(r.Body.String(), fmt.Sprintf(`"changed":%t`, i == 0)) {
+			t.Fatalf("exit/replay: %d %s", r.Code, r.Body)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		sample := trafficTestSample(at.Add(2*time.Minute), "after-transfer", fmt.Sprint(int64(9007199254740993)+int64(i+1)*201), fmt.Sprint(int64(18014398509481986)+int64(i+1)*507))
+		sample.IfIndex, sample.IfName, sample.Uptime = 7+i, fmt.Sprintf("mock-eth%d", 7+i), "22000"
+		if _, err := f.a.recordTrafficSample(ctx, sources[i], sample, &f.admin, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	detail := trafficGetDetail(t, f, at)
+	if detail["used_bytes"] != "3348" || detail["effective_quota_bytes"] != "1000000000500" || detail["remaining_bytes"] != "999999997152" || len(detail["members"].([]any)) != 2 {
+		t.Fatalf("shared balance/history changed: %+v", detail)
+	}
+	var active bool
+	if err := f.a.DB.QueryRow(ctx, `SELECT active FROM traffic_sources WHERE id=$1`, sources[2]).Scan(&active); err != nil || active {
+		t.Fatalf("departed source remains active: %v", err)
+	}
+	var audits int
+	if err := f.a.DB.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action='traffic.member.remove' AND object_id=$1`, servers[2]).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("exit replay duplicated audit: %d %v", audits, err)
+	}
+	addPath := "/api/v1/traffic/accounts/" + f.account + "/members"
+	for _, body := range []map[string]any{{"server_id": servers[2], "server_version": 2, "reason": "Cannot add another customer"}, {"server_id": servers[0], "server_version": 1, "reason": "Cannot duplicate member"}} {
+		r = testRequest(t, f.a, "POST", addPath, body, f.admin)
+		if r.Code != 409 {
+			t.Fatalf("invalid join accepted: %d %s", r.Code, r.Body)
+		}
+	}
+	if _, err := f.a.DB.Exec(ctx, `UPDATE servers SET owner_id=$2,version=version+1 WHERE id=$1`, servers[2], f.owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	r = testRequest(t, f.a, "POST", addPath, map[string]any{"server_id": servers[2], "server_version": 2, "reason": "Stale join"}, f.admin)
+	if r.Code != 409 {
+		t.Fatalf("stale join accepted: %d %s", r.Code, r.Body)
+	}
+	r = testRequest(t, f.a, "POST", addPath, map[string]any{"server_id": servers[2], "server_version": 3, "reason": "Rejoin after ownership confirmation"}, f.admin)
+	if r.Code != 201 {
+		t.Fatalf("rejoin: %d %s", r.Code, r.Body)
+	}
+	var history, live int
+	if err := f.a.DB.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE active) FROM traffic_members WHERE account_id=$1 AND server_id=$2`, f.account, servers[2]).Scan(&history, &live); err != nil || history != 2 || live != 1 {
+		t.Fatalf("membership history lost: %d/%d %v", history, live, err)
+	}
+	replacement := trafficThreePortSource(t, f, bindings[2], 9)
+	sample := trafficTestSample(at.Add(3*time.Minute), "rejoin-baseline", "100", "200")
+	sample.IfIndex, sample.IfName = 9, "mock-eth9"
+	result, err := f.a.recordTrafficSample(ctx, replacement, sample, &f.admin, true)
+	if err != nil || result["quality"] != "baseline" {
+		t.Fatalf("rejoin carried previous baseline: %+v %v", result, err)
+	}
+	if detail := trafficGetDetail(t, f, at); detail["used_bytes"] != "3348" {
+		t.Fatalf("rejoin changed old usage: %+v", detail)
+	}
+}
+
+func TestTrafficPGMemberConcurrentJoinExitAndCollect(t *testing.T) {
+	f := newTrafficFixture(t)
+	ctx := context.Background()
+	path := "/api/v1/traffic/accounts/" + f.account + "/members/" + f.server2
+	r := testRequest(t, f.a, "DELETE", path, map[string]string{"reason": "Prepare second account"}, f.admin)
+	if r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	r = testRequest(t, f.a, "POST", "/api/v1/traffic/accounts", map[string]any{"name": "Second account", "owner_id": f.owner.ID, "quota_bytes": "1000", "direction": "both", "server_ids": []string{f.server2}}, f.admin)
+	secondAccount := trafficResponseID(t, r, 201)
+	server := newID()
+	if _, err := f.a.DB.Exec(ctx, `INSERT INTO servers(id,name,owner_id) VALUES($1,$1,$2)`, server, f.owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	start := make(chan struct{})
+	for _, account := range []string{f.account, secondAccount} {
+		go func(account string) {
+			<-start
+			responses <- testRequest(t, f.a, "POST", "/api/v1/traffic/accounts/"+account+"/members", map[string]any{"server_id": server, "server_version": 1, "reason": "Concurrent admission"}, f.admin)
+		}(account)
+	}
+	close(start)
+	codes := map[int]int{}
+	for i := 0; i < 2; i++ {
+		r = <-responses
+		codes[r.Code]++
+	}
+	if codes[201] != 1 || codes[409] != 1 {
+		t.Fatalf("concurrent join: %+v", codes)
+	}
+	var account string
+	if err := f.a.DB.QueryRow(ctx, `SELECT account_id FROM traffic_members WHERE server_id=$1 AND active`, server).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	start = make(chan struct{})
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			responses <- testRequest(t, f.a, "DELETE", "/api/v1/traffic/accounts/"+account+"/members/"+server, map[string]string{"reason": "Concurrent exit"}, f.admin)
+		}()
+	}
+	close(start)
+	changed := 0
+	for i := 0; i < 2; i++ {
+		r = <-responses
+		if r.Code != 200 {
+			t.Fatalf("concurrent exit: %d %s", r.Code, r.Body)
+		}
+		if strings.Contains(r.Body.String(), `"changed":true`) {
+			changed++
+		}
+	}
+	if changed != 1 {
+		t.Fatalf("exit committed %d times", changed)
+	}
+	base := trafficTestSample(trafficTestTime(), "baseline", "10", "20")
+	if _, err := f.a.recordTrafficSample(ctx, f.source, base, &f.admin, true); err != nil {
+		t.Fatal(err)
+	}
+	base.SampleKey, base.ObservedAt, base.InOctets, base.OutOctets = "concurrent", base.ObservedAt.Add(time.Minute), "110", "220"
+	errors := make(chan error, 1)
+	go func() { _, err := f.a.recordTrafficSample(ctx, f.source, base, &f.admin, true); errors <- err }()
+	r = testRequest(t, f.a, "DELETE", "/api/v1/traffic/accounts/"+f.account+"/members/"+f.server, map[string]string{"reason": "Exit during sample"}, f.admin)
+	if r.Code != 200 {
+		t.Fatalf("collect/exit deadlock or error: %d %s", r.Code, r.Body)
+	}
+	if err := <-errors; err != nil && !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("unexpected concurrent sample error: %v", err)
+	}
+	var count int
+	if err := f.a.DB.QueryRow(ctx, `SELECT count(*) FROM traffic_ledger WHERE source_id=$1`, f.source).Scan(&count); err != nil || count > 1 {
+		t.Fatalf("duplicate concurrent ledger: %d %v", count, err)
+	}
+}
+
+func TestTrafficPGIndependentVLANObservationIsolation(t *testing.T) {
+	f, servers, bindings := trafficThreeServers(t)
+	accounts := make([]string, 3)
+	for i := range servers {
+		r := testRequest(t, f.a, "POST", "/api/v1/traffic/accounts", map[string]any{"name": fmt.Sprintf("Observe independent %d", i), "owner_id": f.owner.ID, "quota_bytes": "10000", "direction": "both", "server_ids": []string{servers[i]}}, f.admin)
+		accounts[i] = trafficResponseID(t, r, 201)
+		f.account = accounts[i]
+		source := trafficThreePortSource(t, f, bindings[i], 7+i)
+		trafficThreePortSamples(t, f, source, i, false)
+	}
+	f.account = accounts[0]
+	body := map[string]any{"account_id": f.account, "device_id": f.device, "kind": "vlan", "role": "observation", "network_domain": "three-server-vlan", "vlan_id": 300, "if_name": "vlan300", "expected_if_index": 300, "mock": true, "coverage_confirmed": true, "vlan_member_ids": servers}
+	r := testRequest(t, f.a, "POST", "/api/v1/traffic/sources", body, f.admin)
+	observation := trafficResponseID(t, r, 201)
+	ctx := context.Background()
+	base := trafficTestSample(trafficTestTime(), "observation-baseline", "1000000", "2000000")
+	base.IfIndex, base.IfName, base.BindingVersion = 300, "vlan300", 0
+	if _, err := f.a.recordTrafficSample(ctx, observation, base, &f.admin, true); err != nil {
+		t.Fatal(err)
+	}
+	base.SampleKey, base.ObservedAt, base.InOctets, base.OutOctets, base.Uptime = "observation-delta", base.ObservedAt.Add(time.Minute), "1007000", "2009000", "16000"
+	if _, err := f.a.recordTrafficSample(ctx, observation, base, &f.admin, true); err != nil {
+		t.Fatal(err)
+	}
+	detail := trafficGetDetail(t, f, trafficTestTime())
+	if detail["used_bytes"] != "408" {
+		t.Fatalf("VLAN observation billed independent account: %+v", detail)
+	}
+	var billable bool
+	if err := f.a.DB.QueryRow(ctx, `SELECT billable FROM traffic_ledger WHERE source_id=$1`, observation).Scan(&billable); err != nil || billable {
+		t.Fatalf("observation was billed: %v", err)
+	}
+	encoded, _ := json.Marshal(detail)
+	if strings.Contains(string(encoded), servers[1]) || strings.Contains(string(encoded), servers[2]) {
+		t.Fatal("customer source exposed unrelated account server identifiers")
+	}
+	body["vlan_member_ids"] = servers[:2]
+	r = testRequest(t, f.a, "POST", "/api/v1/traffic/sources", body, f.admin)
+	if r.Code != 409 {
+		t.Fatalf("incomplete VLAN coverage accepted: %d %s", r.Code, r.Body)
+	}
+	// An existing observation must not silently admit a newly declared port.
+	server, binding := newID(), newID()
+	if _, err := f.a.DB.Exec(ctx, `INSERT INTO servers(id,name,owner_id) VALUES($1,$1,$2)`, server, f.owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.a.DB.Exec(ctx, `INSERT INTO bindings(id,server_id,device_id,kind,port) VALUES($1,$2,$3,'network',10)`, binding, server, f.device); err != nil {
+		t.Fatal(err)
+	}
+	r = testRequest(t, f.a, "POST", "/api/v1/traffic/accounts", map[string]any{"name": "Uncovered server", "owner_id": f.owner.ID, "quota_bytes": "1000", "direction": "both", "server_ids": []string{server}}, f.admin)
+	fourth := trafficResponseID(t, r, 201)
+	r = testRequest(t, f.a, "POST", "/api/v1/traffic/sources", map[string]any{"account_id": fourth, "binding_id": binding, "kind": "port", "role": "primary", "network_domain": "three-server-vlan", "vlan_id": 300, "if_name": "mock-eth10", "expected_if_index": 10, "mock": true}, f.admin)
+	if r.Code != 409 {
+		t.Fatalf("unconfirmed port silently expanded observation: %d %s", r.Code, r.Body)
+	}
+	if _, err := f.a.DB.Exec(ctx, `UPDATE servers SET owner_id=$2,version=version+1 WHERE id=$1`, servers[2], f.other.ID); err != nil {
+		t.Fatal(err)
+	}
+	base.SampleKey, base.ObservedAt = "after-customer-transfer", base.ObservedAt.Add(time.Minute)
+	if _, err := f.a.recordTrafficSample(ctx, observation, base, &f.admin, true); err == nil {
+		t.Fatal("observation kept collecting another customer's traffic")
+	}
+	detail = trafficGetDetail(t, f, trafficTestTime())
+	encoded, _ = json.Marshal(detail)
+	if strings.Contains(string(encoded), observation) || detail["used_bytes"] != "408" {
+		t.Fatalf("unsafe observation remains visible or changes billing: %s", encoded)
+	}
+	r = testRequest(t, f.a, "GET", "/api/v1/servers/"+servers[0]+"/traffic?at="+trafficTestTime().Format(time.RFC3339), nil, f.owner)
+	if r.Code != 200 || strings.Contains(r.Body.String(), observation) || strings.Contains(r.Body.String(), servers[2]) {
+		t.Fatalf("server/WHMCS traffic path leaks transferred coverage: %d %s", r.Code, r.Body)
+	}
+	body["vlan_member_ids"] = servers
+	r = testRequest(t, f.a, "POST", "/api/v1/traffic/sources", body, f.admin)
+	if r.Code != 409 {
+		t.Fatalf("cross-customer VLAN coverage accepted: %d %s", r.Code, r.Body)
+	}
+	r = testRequest(t, f.a, "GET", "/api/v1/traffic/accounts/"+f.account, nil, f.other)
+	if r.Code != 404 {
+		t.Fatalf("other customer read observation account: %d", r.Code)
+	}
+	r = testRequest(t, f.a, "GET", "/api/v1/traffic/accounts/"+f.account, nil, f.admin)
+	if r.Code != 200 || !strings.Contains(r.Body.String(), observation) {
+		t.Fatal("admin lost diagnostic source history")
+	}
+	r = testRequest(t, f.a, "DELETE", "/api/v1/traffic/accounts/"+accounts[2]+"/members/"+servers[2], map[string]string{"reason": "End old customer's membership"}, f.admin)
+	if r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	var active bool
+	if err := f.a.DB.QueryRow(ctx, `SELECT active FROM traffic_sources WHERE id=$1`, observation).Scan(&active); err != nil || active {
+		t.Fatalf("cross-account observation not retired on member exit: %v", err)
+	}
+}
+
+func TestTrafficPGLegacyMembershipMigrationPreservesData(t *testing.T) {
+	baseApp := testApp(t)
+	ctx := context.Background()
+	schema := "traffic_upgrade_" + newID()
+	if _, err := baseApp.DB.Exec(ctx, `CREATE SCHEMA `+schema); err != nil {
+		t.Fatal(err)
+	}
+	conf := baseApp.DB.Config().Copy()
+	conf.ConnConfig.RuntimeParams["search_path"] = schema
+	db, err := pgxpool.NewWithConfig(ctx, conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close(); _, _ = baseApp.DB.Exec(ctx, `DROP SCHEMA `+schema+` CASCADE`) })
+	if _, err = db.Exec(ctx, `CREATE TABLE schema_migrations(name text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"001_base.sql", "002_traffic.sql", "003_console.sql", "004_whmcs.sql", "005_binding_guards.sql"} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(ctx, string(data)); err != nil {
+			t.Fatalf("legacy %s: %v", name, err)
+		}
+		if _, err = db.Exec(ctx, `INSERT INTO schema_migrations(name) VALUES($1)`, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := New(db, Config{BaseURL: "http://localhost"})
+	for _, sql := range []string{
+		`INSERT INTO users(id,email,password_hash,role) VALUES('owner','legacy@example.test','unused','customer')`,
+		`INSERT INTO servers(id,name,owner_id) VALUES('server','legacy server','owner')`,
+		`INSERT INTO devices(id,name,kind) VALUES('device','legacy device','mock_bmc')`,
+		`INSERT INTO bindings(id,server_id,device_id,kind,port) VALUES('binding','server','device','network',7)`,
+		`INSERT INTO traffic_accounts(id,name,owner_id,quota_bytes,direction) VALUES('account','legacy account','owner',1000,'both')`,
+		`INSERT INTO traffic_members(account_id,server_id,server_version) VALUES('account','server',1)`,
+		`INSERT INTO traffic_sources(id,account_id,device_id,binding_id,binding_version,kind,role,network_domain,vlan_id,if_name,expected_if_index) VALUES('port','account','device','binding',1,'port','primary','legacy',100,'mock-eth7',7)`,
+		`INSERT INTO traffic_sources(id,account_id,device_id,kind,role,network_domain,vlan_id,if_name,expected_if_index) VALUES('vlan','account','device','vlan','observation','legacy',100,'vlan100',100)`,
+	} {
+		if _, err = db.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sample := trafficTestSample(trafficTestTime(), "legacy-baseline", "9007199254740993", "1000")
+	if _, err = a.recordTrafficSample(ctx, "port", sample, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	sample.SampleKey, sample.ObservedAt, sample.InOctets, sample.OutOctets = "legacy-increment", sample.ObservedAt.Add(time.Minute), "9007199254741094", "1307"
+	if _, err = a.recordTrafficSample(ctx, "port", sample, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := func() string {
+		var data string
+		err := db.QueryRow(ctx, `SELECT jsonb_build_object('accounts',(SELECT jsonb_agg(to_jsonb(a)) FROM traffic_accounts a),'members',(SELECT jsonb_agg(to_jsonb(m)-'id') FROM traffic_members m),'samples',(SELECT jsonb_agg(to_jsonb(s) ORDER BY s.id) FROM traffic_samples s),'ledger',(SELECT jsonb_agg(to_jsonb(l) ORDER BY l.id) FROM traffic_ledger l),'sources',(SELECT jsonb_agg(to_jsonb(s) ORDER BY s.id) FROM traffic_sources s))::text`).Scan(&data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	before := fingerprint()
+	if err = migrations.Apply(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if after := fingerprint(); after != before {
+		t.Fatalf("006 changed legacy membership/account/source/sample/ledger data\nbefore %s\nafter %s", before, after)
+	}
+	var version int64
+	if err = db.QueryRow(ctx, `SELECT server_version FROM traffic_source_members WHERE source_id='vlan' AND server_id='server'`).Scan(&version); err != nil || version != 1 {
+		t.Fatalf("legacy VLAN coverage not migrated: %d %v", version, err)
+	}
+	sample.SampleKey, sample.ObservedAt, sample.InOctets, sample.OutOctets = "after-upgrade", sample.ObservedAt.Add(time.Minute), "9007199254741195", "1614"
+	if _, err = a.recordTrafficSample(ctx, "port", sample, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	var used string
+	if err = db.QueryRow(ctx, `SELECT sum(upload_bytes+download_bytes)::text FROM traffic_ledger WHERE billable`).Scan(&used); err != nil || used != "816" {
+		t.Fatalf("upgrade broke continuous accounting: %s %v", used, err)
+	}
+	if err = migrations.Apply(ctx, db); err != nil {
+		t.Fatal(err)
 	}
 }

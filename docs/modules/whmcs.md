@@ -64,7 +64,8 @@ This local executable does not alter the system PHP configuration.
 | `php integrations/whmcs/tests/http_contract.php` with cURL enabled | PASS: 112 total assertions (includes the 96 above), including real loopback HTTP, HMAC, idempotency, lifecycle, owned client page, chart data and console contracts |
 | `TestWHMCSPHPRealHandlerContract` | PASS: 17 actual PHP/cURL→Go HTTP→PostgreSQL assertions, including precise large byte counts and stable task identity |
 | `TestIntegrationRevocationRotationPreservesProtection` | PASS: disabling and rotating reject old credentials, preserve protection and do not trigger physical operations |
-| Live licensed WHMCS, Smarty rendering and installed theme integration | NOT_RUN: no WHMCS test instance supplied |
+| Standalone Smarty 5.8.5 and 4.5.8 rendering of the actual template | PASS: 50 additional assertions per version after the 96 shared contract assertions; SVG, empty/sample-only/unauthorized branches and text/attribute escaping |
+| Live licensed WHMCS and installed theme integration | NOT_RUN: no WHMCS test instance supplied |
 | Actual customer device or power requests | NOT_RUN: no device authorization; tests use isolated fixtures |
 
 Offline checks cover exact raw-body/query signing, fresh nonces, numeric string
@@ -76,9 +77,60 @@ conflicts and no secret in the template variables. Fixture routes are not deploy
 
 The chart increment was actually checked with
 `./scripts/verify-whmcs.ps1 -Php ../toolchain/php/php.exe -ExtensionDirectory ../toolchain/php/ext`:
-all seven PHP files passed lint and both contract suites passed. The contract
-checks do not execute Smarty; actual theme rendering remains a separate
-licensed-instance acceptance item below.
+all seven then-existing PHP files passed lint and both contract suites passed.
+The contract checks do not execute Smarty; the separate optional rendering check
+below executes the actual template with official standalone runtimes. Installed
+WHMCS theme and authorization integration still need the licensed-instance checks.
+
+## Optional actual Smarty rendering
+
+`integrations/whmcs/tests/render_template.php` uses the real `ClientArea` view
+model and the unmodified `clientarea.tpl`. It does not load WHMCS, call a platform,
+or connect to devices. Missing `SMARTY_CLASS_FILE` reports `NOT_RUN`; the normal
+verification scripts do not require installing Smarty. PHP DOM and mbstring are
+required for this optional check. Compilation and HTML fixtures stay in ignored
+`work/`; no production `vendor/` or dependency configuration is changed.
+
+On 2026-10-15, official source archives were obtained directly from the
+[Smarty 5.8.5 release](https://github.com/smarty-php/smarty/releases/tag/v5.8.5) and
+[Smarty 4.5.8 release](https://github.com/smarty-php/smarty/releases/tag/v4.5.8).
+The locally computed archive SHA-256 values are:
+
+| Official archive | Local SHA-256 |
+| --- | --- |
+| `https://github.com/smarty-php/smarty/archive/refs/tags/v5.8.5.zip` | `ae01452b925f76fc93f17db1f17336e7bda384bd2a8cb02f202d11842869eadd` |
+| `https://github.com/smarty-php/smarty/archive/refs/tags/v4.5.8.zip` | `74c442d75fc0b23e15af21458d512276226d19e0c022bca6849722f2f91124f3` |
+
+These are provenance/reproduction hashes computed after HTTPS downloads, not a
+claim that the upstream project publishes matching signed checksum files. The
+official `libs/Smarty.class.php` loader is used directly, with PHP's mbstring
+extension; no third-party autoloader code was introduced.
+
+Actual command (repeat with `smarty-4.5.8` for the other verified runtime):
+
+```powershell
+$env:SMARTY_CLASS_FILE = (Resolve-Path 'work/smarty-runtime/smarty-5.8.5/libs/Smarty.class.php').Path
+../toolchain/php/php.exe -d extension_dir=../toolchain/php/ext -d extension=mbstring integrations/whmcs/tests/render_template.php
+```
+
+Both versions returned PASS with no hidden template warnings. Checks parse the
+rendered HTML/SVG, verify measured segments and quality cues, ensure injected
+markup and attribute text remain escaped, and exercise empty-data, sample-only
+and unauthorized branches. Generated `work/whmcs-chart-render.html` and
+`work/whmcs-empty-render.html` contain clearly labelled offline fixture values.
+The last render determines the version shown in those files.
+
+For a browser preview, the same script can act as a loopback PHP router:
+
+```sh
+php -S 127.0.0.1:18081 integrations/whmcs/tests/render_template.php
+```
+
+Open `http://127.0.0.1:18081/whmcs-chart-render.html` or
+`http://127.0.0.1:18081/whmcs-empty-render.html`. Only those two generated files
+are served; other `work/` files and methods are rejected. The preview response
+blocks external connections and form submissions with CSP. Starting a preview
+does not demonstrate licensed WHMCS compatibility.
 
 ## Required licensed-instance checks
 

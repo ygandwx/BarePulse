@@ -47,8 +47,9 @@ go test ./backend/internal/app -run '^TestWHMCSPHPRealHandlerContract$' -count=1
 | `go test ./... -count=1`，设置专用 PostgreSQL 测试连接 | PASS | 集成主任务实际执行：app 64.865s、drivers 1.621s；覆盖身份、库存、任务、流量、控制台、WHMCS 和安全回归 |
 | `go vet ./...`、构建最新后端二进制 | PASS | 集成主任务实际执行；不代表真实设备协议兼容性 |
 | `go test ./backend/internal/drivers`、该包 `go vet` | PASS | 驱动子任务独立执行；全部传输为本地 fixture／mock，无实机请求 |
-| `api/check_contract.py` | PASS | 83 个 OpenAPI 操作覆盖 78 个 Go 路由注册；JSON 格式、重复键、本地引用、Go JSON 字段、路径参数、认证组合和验收测试引用一致性 |
-| `scripts/verify-whmcs.ps1` | PASS | PHP 8.5.11；7 个 PHP 文件 lint；54 条 stub 断言；HTTP 测试累计 69 条断言（含前述 54 条），不是 123 个独立案例 |
+| `api/check_contract.py` | PASS | 85 个 OpenAPI 操作覆盖 80 个 Go 路由注册、48个验收测试引用；JSON 格式、重复键、本地引用、Go JSON 字段、路径参数、认证组合和验收测试引用一致性 |
+| `scripts/verify-whmcs.ps1` | PASS | PHP 8.5.11；8 个 PHP 文件 lint；96 条 stub 断言；HTTP 测试累计 112 条断言（含前述 96 条） |
+| 实际 Smarty 模板渲染 | PASS | 官方 Smarty 4.5.8 / 5.8.5 各50条渲染断言，覆盖SVG、转义、空数据、仅样本和未授权分支；浏览器也核对双向区间/灰色未知带/失败样本及空数据提示。实际WHMCS实例仍未验 |
 | `TestWHMCSPHPRealHandlerContract` | PASS | 最新定向执行 1.76s（包 4.304s），17 条 PHP→真实 Go/PG 断言；summary／power／traffic 大整数／幂等 power-actions／task／console，以及错误客户和服务拒绝；数据库核验只有 1 条任务和 1 个控制台会话 |
 | `go test ./backend/internal/app -run '^TestTrafficPGThree' -count=1 -v` | PASS | 三台独立账户 0.94s、三成员共享账户 0.85s，包 4.714s；同 VLAN 主源拒绝重复、精确合计和重放唯一记账均实际检查 |
 | Windows `go test -race` | NOT_RUN | 当前 Windows 工具链没有所需 CGO 编译器；同一代码的 Linux race 已在 CI 实际通过 |
@@ -65,10 +66,10 @@ OpenAPI 文件使用 JSON 语法（合法 YAML 1.2 子集），不增加 YAML �
 
 | 案例 | 代码与离线测试 | 本轮判断及尚需外部验证 |
 | --- | --- | --- |
-| A01 同 VLAN 三台独立额度 | `TestTrafficPGThreeIndependentAccountsSameVLAN`、`TestTrafficPGObservationOverlapAndBindingDrift`、`TestTrafficPGConstraintsSerializeOverlap` | 精确三台 PG 场景 PASS：同 domain/VLAN 300，三个账户各含一个成员，各端口独立记账，恰好 3 条 ledger；VLAN 主源重复被拒绝，observation 不入账。真实交换机端口/VLAN 归属、收发方向需授权核验 |
+| A01 同 VLAN 三台独立额度 | `TestTrafficPGThreeIndependentAccountsSameVLAN`、`TestTrafficPGObservationOverlapAndBindingDrift`、`TestTrafficPGConstraintsSerializeOverlap`、`TestTrafficPGIndependentVLANObservationIsolation` | 精确三台 PG 场景 PASS：同 domain/VLAN 300，三个账户各含一个成员，各端口独立记账，恰好 3 条 ledger；VLAN 主源重复被拒绝，同客户跨独立账户observation可汇总但不入账。覆盖成员转客户后停止采集、隐藏客户观察数据；未确认新端口不能扩大覆盖。真实拓扑/方向需授权核验 |
 | A02 三台共享额度 | `TestTrafficPGThreeSharedMembersExactReplay`、`TestTrafficPGSharedPortsAndBoundaryHold`、`TestTrafficPGAccountingReplayOwnershipAndAdjustments` | 精确三成员 PG 场景 PASS：upload 606、download 1842、used 2448；每个末样本重放 3 次仍只有 6 个样本／3 条 ledger；三个服务器入口指向同账户，跨客户 404、跨 owner 组建 409。实机完整覆盖范围需授权确认 |
 | A03 重启／中断／ifIndex 变更 | `TestTrafficCounterQualityAndPrecision`、`TestTrafficPGQualitySequenceAndMockCollector`、`TestTrafficPGMemberVersionRefreshKeepsHistory`、`TestTrafficSNMPReadOnlyContract` | 离线 PASS。复位、discontinuity、重映射分别标质量，重新建立基线，不生成巨额或零流量。真实固件 IF-MIB 响应与映射尚未验证 |
-| A04 漏采跨周期／重跑／额度调整 | `TestTrafficCycleBoundaryIsNotInvented`、`TestTrafficPGAccountingReplayOwnershipAndAdjustments`、`TestTrafficPGSharedPortsAndBoundaryHold` | 离线 PASS。重复样本唯一入账，冲突重放拒绝；跨周期差值保留 `boundary_unallocated`，不按时间比例猜分；调整保留原因与幂等键 |
+| A04 漏采跨周期／重跑／额度调整 | `TestTrafficCycleBoundaryIsNotInvented`、`TestTrafficPGAccountingReplayOwnershipAndAdjustments`、`TestTrafficPGSharedPortsAndBoundaryHold`、`TestTrafficPGMemberTransferKeepsSharedPeriod`、`TestTrafficPGMemberConcurrentJoinExitAndCollect`、`TestTrafficPGLegacyMembershipMigrationPreservesData` | 离线 PASS。重复样本唯一入账，冲突重放拒绝；跨周期差值保留 `boundary_unallocated`，不猜分；调整保留原因与幂等键。成员退出/重入保留历史区间及当期quota/ledger；并发加入、退出与采集序列化；真实001–005旧数据升级006前后指纹一致并继续入账 |
 | A05 电源重复／超时／worker 重启 | `TestPowerIdempotencyOwnershipAndExecution`、`TestPowerUnknownBlocksAndRestartDoesNotReplay`、`TestPowerRecoveryAndDeviceSerialization`、`TestPiKVMTimeoutSentOnce`、`TestSNMPWriteFenceAndValidation`、`TestRuntimeIPMIDurableDispatchAndRevocation`、`TestIPMIAmbiguousWriteNeverRetriesOrLeaksOutput` | 离线 PASS。超时为 unknown、保留设备锁且不自动重发；SNMP 写保护禁止库内部重发 SET；IPMI 指令一次尝试、审批撤销阻止派发、uncertain任务幂等及阻断。实机超时后最终物理状态另需授权观察 |
 | A06 PiKVM 200 内层失败／缺状态 | `TestPiKVMRejectsInnerFailures`、`TestPiKVMRequestAndCompletion`、`TestPowerMockScenariosAndSupplySemantics` | fixture PASS。HTTP 成功不能替代业务成功；缺失／非法 status、error、res 与返回格式均受检查。定制固件实际响应未调用验证 |
 | A07 排队后绑定／归属变化 | `TestPowerBindingChangeAndDeviceChangeRejectDispatch`、`TestInventoryOwnershipConflictsAndHistory`、`TestSecuritySessionListHidesReassignedAssets` | PG PASS。server/device/binding 版本及客户归属在执行前复核，旧任务不能作用到新目标；历史绑定保留 |

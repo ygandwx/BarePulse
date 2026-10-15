@@ -563,7 +563,9 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ServerInput",
-                "required": ["version"]
+                "required": [
+                  "version"
+                ]
               }
             }
           }
@@ -737,7 +739,9 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DeviceInput",
-                "required": ["version"]
+                "required": [
+                  "version"
+                ]
               }
             }
           }
@@ -848,7 +852,9 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UserInput",
-                "required": ["password"]
+                "required": [
+                  "password"
+                ]
               }
             }
           }
@@ -4371,7 +4377,12 @@
                   },
                   "action": {
                     "type": "string",
-                    "enum": ["power_on", "request_shutdown", "hard_reset", "power_cycle"]
+                    "enum": [
+                      "power_on",
+                      "request_shutdown",
+                      "hard_reset",
+                      "power_cycle"
+                    ]
                   },
                   "idempotency_key": {
                     "type": "string",
@@ -4616,6 +4627,194 @@
                 "additionalProperties": false
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/traffic/accounts/{id}/members": {
+      "post": {
+        "tags": [
+          "Traffic"
+        ],
+        "summary": "Add a reviewed same-owner member",
+        "description": "Administrator only. Requires the current server_version and same account owner. Rejects stale versions, duplicate active membership and membership in another account with 409. Retires this account VLAN sources because their previous coverage is no longer valid; preserves quota, adjustments and historical ledger.",
+        "operationId": "trafficMemberAdd",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CSRF": []
+          }
+        ],
+        "x-go-route": "POST /api/v1/traffic/accounts/{id}/members",
+        "x-required-role": "admin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ID"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "server_id": {
+                    "$ref": "#/components/schemas/ID"
+                  },
+                  "server_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "server_id",
+                  "server_version",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Membership change recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account_id": {
+                      "$ref": "#/components/schemas/ID"
+                    },
+                    "server_id": {
+                      "$ref": "#/components/schemas/ID"
+                    },
+                    "server_version": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "changed": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "account_id",
+                    "server_id",
+                    "server_version",
+                    "changed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/traffic/accounts/{id}/members/{server_id}": {
+      "delete": {
+        "tags": [
+          "Traffic"
+        ],
+        "summary": "Remove a member without discarding the account ledger",
+        "description": "Administrator only, with an audit reason. Retires the member port sources, account VLAN sources and any VLAN observations covering that server. Preserves historical membership, samples, ledger, quota and adjustments. Repeated removal returns changed=false without duplicate audit; a server never belonging to the account returns 404.",
+        "operationId": "trafficMemberRemove",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CSRF": []
+          }
+        ],
+        "x-go-route": "DELETE /api/v1/traffic/accounts/{id}/members/{server_id}",
+        "x-required-role": "admin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ID"
+            }
+          },
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ID"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Membership change recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
+                    "history_preserved": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "removed",
+                    "changed",
+                    "history_preserved"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -5904,6 +6103,13 @@
           },
           "active": {
             "type": "boolean"
+          },
+          "vlan_member_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ID"
+            },
+            "description": "Admin/operator only. Confirmed same-owner VLAN coverage IDs; omitted for customers and WHMCS. Ownership or version drift invalidates the observation and hides its data from customers."
           }
         },
         "required": [
@@ -5927,7 +6133,7 @@
         ],
         "additionalProperties": false,
         "x-go-type": "app.TrafficSource",
-        "description": "Customer views redact device_id, binding_id, if_name, network_domain to empty strings and interface/VLAN identifiers to zero. Primary port/VLAN coverage cannot overlap; observation sources never bill."
+        "description": "Customer views redact device_id, binding_id, if_name, network_domain to empty strings and interface/VLAN identifiers to zero. Primary port/VLAN coverage cannot overlap; observation sources never bill. VLAN observations may cover same-owner servers in several independent accounts; they never bill. Unsafe current coverage is hidden from customers after ownership drift."
       },
       "TrafficSample": {
         "type": "object",
