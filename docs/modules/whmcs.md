@@ -1,0 +1,155 @@
+# WHMCS module implementation and acceptance
+
+The [module source and installation guide](../../integrations/whmcs/README.md)
+implement a provisioning module, customer product-detail template, signed
+server-to-server API client, access lifecycle functions, session CSRF protection,
+power submission idempotency, task polling and one-use console portal links.
+
+The platform independently validates integration/service/client/server ownership
+and rejects replayed HMAC nonces. The module adds an active `CurrentUser` client
+check and a `tblhosting` ownership query before any client-area API request.
+Neither browser-supplied `client_id`, server ID, port, credentials nor arbitrary
+device URLs are trusted. The normal WHMCS product-details route remains the entry
+point, so installed WHMCS account/contact permissions also apply.
+
+Secrets reside in server environment variables referenced by module configuration.
+Administrators can edit an integration's name, secret reference and enabled state
+through the management page and `PUT /api/v1/integrations/{id}`. Every update
+revokes existing portal tickets/access grants; enabling again does not revive them.
+Ticket redemption serializes with that update. Installation protection and
+service/asset history remain intact. Place the new secret in the server environment
+before changing its reference; no secret is entered in the browser.
+The custom template receives only a filtered view model, a session CSRF token,
+form idempotency key and an explicitly requested short-lived portal ticket. It
+does not receive the integration secret. All dynamic template text and attributes
+are escaped. API transport verifies HTTPS, refuses redirects, bounds response
+size and time, and never automatically resends POST. Errors stay visible.
+
+Create verifies an administrator's existing mapping before returning WHMCS
+`success`. Suspend/resume alter access only. Terminate surfaces `SERVICE_BUSY`
+while protected sessions or uncertain/running operations remain. Payment state is
+never translated into a physical power/network operation. Task display reports
+acceptance, completion and target observation separately; traffic bytes remain
+decimal strings, with coverage notes and unallocated intervals shown.
+
+The product-detail page renders an SVG upload/download chart from the platform's
+actual `intervals` and `samples` response. Each source interval is a horizontal
+average-rate segment over its measured duration; different sources are overlaid,
+not silently summed. Unknown intervals are grey bands, recovered gaps and
+cross-period unallocated totals use dashed segments, and failed samples appear
+as red dots. Empty coverage is not drawn as zero. The latest sample timestamp and
+an accessible table of exact byte strings accompany the chart. A baseline-only
+sample does not invent an interval rate.
+
+The PHP view model bounds work to 2,000 incoming intervals, plots the latest 200,
+includes at most 100 samples and displays 20 detail rows. It reports truncated
+and invalid interval counts, validates timestamps and unsigned decimal strings
+of at most 30 digits, and emits bounded numeric SVG coordinates. Floating-point
+conversion is used only for display coordinates and approximate bps labels;
+accounting and byte labels retain their original decimal strings. Raw JSON,
+device addresses and credential metadata are not passed into scripts or SVG.
+The chart needs no third-party JavaScript or browser-side request credentials.
+
+## Executed offline evidence
+
+On 2026-10-15, PHP 8.5.11 Windows NTS was obtained from the official PHP download
+and checked against SHA-256
+`0ea96e0d2b9b737a6036f05cf4e95c49313faa6d0f27bd97edb2742503f0c043`.
+This local executable does not alter the system PHP configuration.
+
+| Check | Result |
+| --- | --- |
+| `php -l` for module and library PHP files | PASS |
+| `php integrations/whmcs/tests/contract.php` | PASS: 96 assertions against WHMCS framework/API stubs, including measured chart rates, gaps, invalid input, exact bytes and bounded SVG data |
+| `php integrations/whmcs/tests/http_contract.php` with cURL enabled | PASS: 112 total assertions (includes the 96 above), including real loopback HTTP, HMAC, idempotency, lifecycle, owned client page, chart data and console contracts |
+| `TestWHMCSPHPRealHandlerContract` | PASS: 17 actual PHP/cURL→Go HTTP→PostgreSQL assertions, including precise large byte counts and stable task identity |
+| `TestIntegrationRevocationRotationPreservesProtection` | PASS: disabling and rotating reject old credentials, preserve protection and do not trigger physical operations |
+| Standalone Smarty 5.8.5 and 4.5.8 rendering of the actual template | PASS: 50 additional assertions per version after the 96 shared contract assertions; SVG, empty/sample-only/unauthorized branches and text/attribute escaping |
+| Live licensed WHMCS and installed theme integration | NOT_RUN: no WHMCS test instance supplied |
+| Actual customer device or power requests | NOT_RUN: no device authorization; tests use isolated fixtures |
+
+Offline checks cover exact raw-body/query signing, fresh nonces, numeric string
+identifiers, ownership mismatch, unauthenticated client, missing database ownership,
+CSRF rejection before network I/O, hidden maintenance actions, duplicate submission,
+idempotency-key retention after timeout, partial/unknown task semantics, large
+traffic integers, malformed API responses, disabled redirect following, lifecycle
+conflicts and no secret in the template variables. Fixture routes are not deployed.
+
+The chart increment was actually checked with
+`./scripts/verify-whmcs.ps1 -Php ../toolchain/php/php.exe -ExtensionDirectory ../toolchain/php/ext`:
+all seven then-existing PHP files passed lint and both contract suites passed.
+The contract checks do not execute Smarty; the separate optional rendering check
+below executes the actual template with official standalone runtimes. Installed
+WHMCS theme and authorization integration still need the licensed-instance checks.
+
+## Optional actual Smarty rendering
+
+`integrations/whmcs/tests/render_template.php` uses the real `ClientArea` view
+model and the unmodified `clientarea.tpl`. It does not load WHMCS, call a platform,
+or connect to devices. Missing `SMARTY_CLASS_FILE` reports `NOT_RUN`; the normal
+verification scripts do not require installing Smarty. PHP DOM and mbstring are
+required for this optional check. Compilation and HTML fixtures stay in ignored
+`work/`; no production `vendor/` or dependency configuration is changed.
+
+On 2026-10-15, official source archives were obtained directly from the
+[Smarty 5.8.5 release](https://github.com/smarty-php/smarty/releases/tag/v5.8.5) and
+[Smarty 4.5.8 release](https://github.com/smarty-php/smarty/releases/tag/v4.5.8).
+The locally computed archive SHA-256 values are:
+
+| Official archive | Local SHA-256 |
+| --- | --- |
+| `https://github.com/smarty-php/smarty/archive/refs/tags/v5.8.5.zip` | `ae01452b925f76fc93f17db1f17336e7bda384bd2a8cb02f202d11842869eadd` |
+| `https://github.com/smarty-php/smarty/archive/refs/tags/v4.5.8.zip` | `74c442d75fc0b23e15af21458d512276226d19e0c022bca6849722f2f91124f3` |
+
+These are provenance/reproduction hashes computed after HTTPS downloads, not a
+claim that the upstream project publishes matching signed checksum files. The
+official `libs/Smarty.class.php` loader is used directly, with PHP's mbstring
+extension; no third-party autoloader code was introduced.
+
+Actual command (repeat with `smarty-4.5.8` for the other verified runtime):
+
+```powershell
+$env:SMARTY_CLASS_FILE = (Resolve-Path 'work/smarty-runtime/smarty-5.8.5/libs/Smarty.class.php').Path
+../toolchain/php/php.exe -d extension_dir=../toolchain/php/ext -d extension=mbstring integrations/whmcs/tests/render_template.php
+```
+
+Both versions returned PASS with no hidden template warnings. Checks parse the
+rendered HTML/SVG, verify measured segments and quality cues, ensure injected
+markup and attribute text remain escaped, and exercise empty-data, sample-only
+and unauthorized branches. Generated `work/whmcs-chart-render.html` and
+`work/whmcs-empty-render.html` contain clearly labelled offline fixture values.
+The last render determines the version shown in those files.
+
+For a browser preview, the same script can act as a loopback PHP router:
+
+```sh
+php -S 127.0.0.1:18081 integrations/whmcs/tests/render_template.php
+```
+
+Open `http://127.0.0.1:18081/whmcs-chart-render.html` or
+`http://127.0.0.1:18081/whmcs-empty-render.html`. Only those two generated files
+are served; other `work/` files and methods are rejected. The preview response
+blocks external connections and form submissions with CSP. Starting a preview
+does not demonstrate licensed WHMCS compatibility.
+
+## Required licensed-instance checks
+
+- Install on the actual supported WHMCS/PHP combination and test the selected
+  Smarty theme; confirm normal product-page account/contact permission checks.
+- Log in as two client accounts. Tamper with service IDs and submitted fields;
+  confirm the other account's server, traffic, task and console remain inaccessible.
+- Submit repeated POSTs, an expired CSRF token and a response-loss fault. Verify
+  stable task identity and that neither the browser nor module repeats a device
+  command. Confirm task refresh uses GET rather than form resubmission.
+- Verify the configured PHP-FPM environment, CA trust and system clock. Confirm
+  platform errors appear without credentials in page HTML, logs or browser storage.
+- Suspend, resume and terminate a mapped service while queued tasks, protected
+  installation work and unknown outcomes exist. Confirm access revocation and
+  explicit conflicts without physical cutoff or loss of protection.
+- Redeem a console ticket once, then test replay and expiry. Verify its actual
+  media revocation separately under the console/device acceptance procedure.
+
+References: [WHMCS Client Area Output](https://developers.whmcs.com/provisioning-modules/client-area-output),
+[WHMCS Core Module Functions](https://developers.whmcs.com/provisioning-modules/core-module-functions),
+[WHMCS authentication via CurrentUser](https://developers.whmcs.com/advanced/authentication).
+These document module entry points; they do not replace installed-version testing.
