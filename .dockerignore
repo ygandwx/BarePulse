@@ -1,0 +1,7 @@
+.git
+.env
+work
+bin
+node_modules
+integrations
+docs

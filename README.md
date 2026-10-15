@@ -2,7 +2,46 @@
 
 轻量级物理服务器管理平台，统一服务器资产、流量额度、电源操作和远程控制台，并向 WHMCS 提供标准 API。
 
-当前处于开发规划阶段。本次提交仅建立需求与接入设计文档，不代表功能已实现或设备已完成联调。
+已进入首期实现：Go + PostgreSQL 后端、同源管理界面、模拟电源任务、流量账本、共享控制台和 WHMCS 模块。代码与离线验证进度见 [实现状态](docs/implementation-status.md)。真实设备访问默认关闭；模拟验证不代表实机验收。
+
+## 本地启动
+
+依赖：Go 1.27.2、PostgreSQL 18.6；前端使用浏览器原生 ES modules，无 npm 构建。Docker Compose 可管理本地数据库与应用。
+
+```sh
+cp .env.example .env
+# 编辑 .env，设置唯一数据库密码和 12–72 字节管理员口令（示例不能直接用于生产）。
+docker compose up -d db
+docker compose build app
+docker compose run --rm app migrate
+docker compose run --rm app bootstrap
+docker compose up -d app
+```
+
+打开 `http://127.0.0.1:8080`，用初始化账号登录。初始化只允许空用户库；不要重复运行来重置账号。执行后从 `.env` 移除 `ADMIN_PASSWORD`，已运行应用不需要管理员明文口令。
+
+无 Docker 时，先建立本地空库并设置 `DATABASE_URL`、`ADMIN_EMAIL`、`ADMIN_PASSWORD`：
+
+```sh
+go run ./backend/cmd/barepulse migrate
+go run ./backend/cmd/barepulse bootstrap
+go run ./backend/cmd/barepulse serve
+```
+
+程序不会自动加载 `.env`；原生运行需用当前 shell 设置环境变量。默认监听 `127.0.0.1:8080`。首轮操作：新增客户 → 新增服务器 → 新增 `mock_pikvm`／`mock_pdu`／`mock_bmc` 设备 → 电源绑定 → 电源任务页面提交动作 → 查看任务结果及审计。模拟数据清楚标记，未采样状态为 unknown。
+
+## 验证
+
+使用专用测试数据库，测试自动创建并清理独立 schema：
+
+```sh
+export TEST_DATABASE_URL='postgres://barepulse:your-test-password@127.0.0.1:5432/barepulse_test?sslmode=disable'
+sh scripts/verify.sh
+```
+
+Windows：设置同名环境变量后执行 `./scripts/verify.ps1`。Linux 检查包含 race detector；Windows 当前测试环境无 CGO，普通并发和真实数据库测试可执行，race 单独记录未运行。缺少 `TEST_DATABASE_URL` 时统一验证入口会失败，不把跳过集成测试当作通过。
+
+WHMCS 安装与 PHP 离线测试见 [WHMCS 模块](docs/modules/whmcs.md)。运行配置、备份恢复和现场验收限制见 [运维手册](docs/operations.md)。
 
 ## 文档
 

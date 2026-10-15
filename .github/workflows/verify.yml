@@ -1,0 +1,38 @@
+name: offline-verification
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-bookworm
+        env:
+          POSTGRES_USER: barepulse
+          POSTGRES_PASSWORD: test-only-local-secret
+          POSTGRES_DB: barepulse_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U barepulse -d barepulse_test'
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://barepulse:test-only-local-secret@127.0.0.1:5432/barepulse_test?sslmode=disable
+      ALLOW_REAL_DEVICES: 'false'
+      ALLOW_DEVICE_WRITES: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: sh scripts/verify.sh
+      - run: docker compose config --quiet
+        env:
+          POSTGRES_PASSWORD: compose-validation-only
+      - run: docker build -t barepulse:ci .

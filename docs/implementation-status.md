@@ -1,90 +1,60 @@
 # BarePulse 实现进度与续接记录
 
-更新时间：2026-10-15（Asia/Shanghai）
-
-此文件是持续开发的工作记录；每个功能增量后更新，不以聊天记忆替代。初始化状态为文档已完成、代码尚未开始。
+更新时间：2026-10-15（Asia/Shanghai）。代码、离线验证、实机证据分别记录。
 
 ## 当前工作点
 
-| 字段 | 当前值 |
-| --- | --- |
-| 当前阶段 | M0 规划与开发流程已建立，下一步 M1 |
-| 当前任务 | 尚未启动代码实现 |
-| 当前文档分支 | `main` |
-| 建议实现分支 | `codex/barepulse-implementation`；本次尚未创建 |
-| 最近实现提交 | 无；文档提交不计作功能实现 |
-| 可运行程序 | 尚无 |
-| 设备授权 | 离线开发；没有新增实机查询／控制授权 |
-| 下一条任务 | 核对仓库与环境，建立开发分支、最小 API 契约和可启动工程骨架 |
+- 分支：`codex/barepulse-implementation`；基线 `0127756`。原仓库只有文档且无用户修改，本聊天在 `work/BarePulse` 新克隆。
+- 当前增量：首个可运行实现检查点；最近实现提交由本记录所在提交确定（`git log -1`）。
+- 第一批已实际浏览器打通：管理员登录 → DEMO-UI-01服务器 → mock_pikvm设备 → 电源/控制台端口绑定 → power_on → succeeded → started/succeeded审计。
+- 实际工具：Go 1.27.2、PostgreSQL 18.6、PHP 8.5.11，官方便携包置于聊天 work/toolchain；Go/PHP SHA256核验。PG仅监听127.0.0.1:55432，测试库barepulse_test，每测试独立schema。
+- 下一条任务：继续安全审查修复（慢请求撤权及operator边界），完成OpenAPI、浏览器M2/M4/M5验收、备份恢复及统一检查，再更新本文件提交。
+- 仅离线代码、本地服务、loopback/模拟测试；没有真实设备访问或生产部署。
 
 ## 阶段状态
 
-代码状态使用 `NOT_STARTED / IN_PROGRESS / IMPLEMENTED / BLOCKED / NOT_APPLICABLE`；验证状态独立使用 `NOT_RUN / PASS / FAIL / BLOCKED / NOT_APPLICABLE`。软件阶段完成以该阶段代码与必要离线验收证据齐备为准；实机验证独立保留 `BLOCKED / NOT_RUN`，不因此阻塞后续离线开发。缺少关键离线测试证据仍应如实标记，不能宣称已验收。
+| 阶段 | 代码 | 离线验证 | 实机/外部 |
+| --- | --- | --- | --- |
+| M1 | IMPLEMENTED | PostgreSQL与浏览器首链PASS；OpenAPI收尾中 | 不适用 |
+| M2 | IMPLEMENTED | 账本/并发/归属/模拟采集/JS模块PASS；完整浏览器操作待验 | BLOCKED：SN2410/VyOS未授权 |
+| M3 | IMPLEMENTED：PiKVM/Redfish/APC；IPMI unsupported | 默认禁用、PG调度、loopback契约PASS | BLOCKED：固件/MIB/实际控制未验 |
+| M4 | IN_PROGRESS：模拟网关、队列、保护、介质已实现 | PG交接/旧流关闭/重启保护PASS；权限竞态继续修复 | BLOCKED：真实媒体路由和隔离证据不全 |
+| M5 | IN_PROGRESS：平台映射/签名/门户/PHP模块已实现 | HMAC/归属/门户/生命周期PG与PHP契约PASS | BLOCKED：无WHMCS/Smarty实例 |
+| M6 | IN_PROGRESS | 原生启动/构建PASS；交付资料和恢复演练继续 | BLOCKED：生产/实机未授权 |
 
-| 阶段 | 代码状态 | 离线验证 | 实机／外部验证 | 下一步 |
-| --- | --- | --- | --- | --- |
-| M0 需求与流程 | NOT_APPLICABLE（文档已建立） | 文档校核 | NOT_APPLICABLE | 进入 M1 |
-| M1 基础平台与模拟任务 | NOT_STARTED | NOT_RUN | NOT_APPLICABLE | 工程、数据库、身份、资产、任务与页面 |
-| M2 流量与额度 | NOT_STARTED | NOT_RUN | BLOCKED：未授权设备查询 | 先用采样夹具实现计量 |
-| M3 电源驱动 | NOT_STARTED | NOT_RUN | BLOCKED：无指定测试目标与授权 | 先实现固定契约与模拟服务 |
-| M4 共享控制台 | NOT_STARTED | NOT_RUN | BLOCKED：媒体通道和隔离未验证 | 先实现会话状态机与受限代理测试 |
-| M5 WHMCS | NOT_STARTED | NOT_RUN | BLOCKED：未提供测试实例 | 先实现模块与本地契约环境 |
-| M6 验收与交付 | NOT_STARTED | NOT_RUN | BLOCKED：生产上线未授权 | 准备部署、恢复与检查清单 |
+## 实现与决定
 
-外部验证阻塞不自动阻塞其它阶段的代码实现。模拟验证通过不能改成实机验证通过。
+- 空库管理员初始化、bcrypt、哈希会话、CSRF/Origin、退出撤销和登录限流；无默认口令。
+- 资产/设备/用户CRUD、历史绑定/版本、数据库端口唯一与跨power/console物理端口归属；operator默认只读自有范围。
+- 持久任务、幂等、设备与服务器串行、执行前版本复核、unknown不自动重发、至少30秒冷却；PDU供电与服务器状态分开。
+- 真实电源调用要求双总开关与外部精确设备/server/port/action/时间窗profile；默认关闭。APC不猜OID，IPMI未支持。
+- 独立/共享流量账户，原始样本与精确十进制账本、port/VLAN重叠保护、观测不入账、重跑去重、复位/漏采/换绑质量；跨周期不明字节保留未分配。
+- KVM整机独占、队列、持久保护、单次票据与短时授权；登记中的旧stream未关闭不交接，键鼠/介质清理有模拟状态证据。真实网关未开放。
+- WHMCS按实例/服务/客户/服务器独立校验，HMAC nonce防重放；生命周期只撤销平台访问，保护作业保留。
+- Go 1.27.2 / PostgreSQL 18.6 / pgx v5.7.6 / gosnmp v1.45.0 / x/crypto v0.41.0锁定；同源原生ES modules，无npm构建链。秘密通过外部profile/环境变量引用，不存客户响应或审计。
+- 收费、超额限速、断网、断电均默认关闭；不推定业务政策。
 
-## 第一批端到端交付清单
+## 实际检查记录
 
-- [ ] 工程目录、依赖版本锁定和开发配置样例。
-- [ ] PostgreSQL 迁移与最小数据模型。
-- [ ] 管理员初始化、登录、授权和退出。
-- [ ] 服务器、设备、端口绑定的增删改查与唯一性约束。
-- [ ] 最小 OpenAPI 契约及统一错误结构。
-- [ ] 模拟电源驱动和异常夹具。
-- [ ] 持久任务、幂等、调度、审计及任务查询。
-- [ ] 管理前端可完成录入、绑定、提交任务和查看结果。
-- [ ] 启动与验证命令确实可执行；真实设备连接默认关闭。
-
-## 测试证据
-
-尚未运行应用构建或测试，因为尚无应用代码。开发开始后逐项记录实际命令、环境、结果和提交；失败或未运行如实填写。
-
-| 时间 | 对应功能／提交 | 实际命令与环境 | 结果 | 限制／后续 |
-| --- | --- | --- | --- | --- |
-| 待填写 | — | — | NOT_RUN | — |
-
-## 技术决定
-
-| 日期 | 决定 | 理由与可调整范围 |
+| 检查 | 实际结果 | 限制 |
 | --- | --- | --- |
-| 2026-10-15 | 建议 Go + PostgreSQL + Docker Compose，模块化单体 | 沿用现有计划；实现者核对环境后锁定版本并记录 |
-| 2026-10-15 | 模块代码、离线验证、实机验证分别记录 | 防止把模拟结果当成设备已验证 |
-| 2026-10-15 | 开发增量通过后持续进入下一项 | 避免每个阶段要求用户重新说“继续” |
+| 首轮 `go test ./... -count=1` + TEST_DATABASE_URL | PASS（app 29.462s，drivers 1.464s） | 后续新增安全测试发现的问题单独修复，不用旧PASS覆盖 |
+| Foundation真实PG全套 | PASS（新增registry后23.389s）；五模拟场景、授权profile/撤销、APC构造回归PASS | 仅loopback及模拟 |
+| `go test ./backend/internal/app -run '^TestTraffic' -count=1 -v` | 9主测试与质量子例PASS（12.139s），含12并发去重与port/VLAN SQL互斥 | 真实SNMP未调用 |
+| `go test ./backend/internal/drivers` / vet | PASS，11主测试及内层错误子例 | Windows -race因CGO缺失NOT_RUN |
+| `go test ./backend/internal/app -run 'Test(Console\|Security\|WHMCS)' -count=1 -v` | PASS（20.899s）；含慢body撤权、旧stream关闭、保护保留 | 新增审查项继续运行 |
+| 安全审查追加 | 7主测试+子例PASS（16.396s）：单连接池、新active覆盖旧terminated、旧Terminate重放不误取消新任务等 | operator删除介质/慢body改保护已修复；9安全主测试最终PASS（27.464s） |
+| PHP contract.php / http_contract.php | 54断言PASS；HTTP loopback累计69断言PASS，六PHP文件lint PASS | 真WHMCS/Smarty NOT_RUN |
+| Go vet/build、migration/bootstrap/serve | PASS；原生应用已启动，浏览器M1完成 | 宿主无Docker，容器验收待CI |
+| JS | 模块语法PASS；traffic实际ES module import/图表数据契约PASS | 其余完整浏览器操作继续 |
 
-## 阻塞和待决项
+已发现并修复：PHP任务和门户票据32hex误设→平台48hex；APC IP:161 URL解析panic；慢输入/上传跨权限或服务撤销；portal把operator提升为customer；事务中再取pool导致饥饿；历史terminated误阻新服务、旧Terminate影响新服务。WHMCS重复幂等返回200是既定API，测试从错误预期202校正为200。后续发现项继续如实记录，不删断言修绿。
 
-| 项目 | 影响范围 | 可以继续的工作 |
-| --- | --- | --- |
-| 实机查询与控制未授权 | SNMP／设备 HTTP／SSH 现场测试 | 驱动代码、模拟、解析、权限、队列和前端 |
-| 计量方向、周期、单位、超额动作尚待业务确定 | 正式业务政策启用 | 双向原始计数、配置模型、账本和样例政策；自动收费／限速／断电默认关闭 |
-| APC 固件/MIB 与 BMC 能力资料不足 | 对应动作映射的实机确认 | 已有证据支持的接口、能力声明和模拟测试；未知动作明确不支持 |
-| WHMCS 测试环境未提供 | 真正的 WHMCS 页面和生命周期验收 | 模块代码、API 契约测试和部署说明 |
+## 续接与外部阻塞
 
-## 暂停／额度检查点
+当前持续执行，未因额度暂停。最近可靠读数为周额度已用15%，仅当时读数，不声明后台持续监控。
 
-当前未因额度暂停，也没有读取到可据此判断的剩余额度数值。
-
-后续暂停前填写：
-
-- 暂停原因及环境实际提供的信号：
-- 当前分支／worktree：
-- 最后实现提交／PR：
-- 未提交与未推送文件：
-- 最后一个通过的检查：
-- 失败、未运行和待实机检查：
-- 下一步的准确文件、动作或命令：
-- 恢复所需的用户输入（仅确实不可替代的项）：
-
-## 恢复流程
-
-读取本文件与 `AGENTS.md`，核对 Git 状态和实际代码，恢复未完成检查，然后继续依赖已满足的任务。不重复询问常规技术选择，不把已通过阶段重新实现一遍。
+- 首次实现正在保存本地提交并尝试push/PR；结果在下一检查点记录，不强推。
+- 离线剩余：安全回归、OpenAPI与路由覆盖、浏览器后续模块、PHP统一验证脚本、备份恢复、干净容器CI、最终A01–A16证据矩阵。
+- 外部剩余：具体设备/端口/窗口授权、固件/MIB/供电拓扑/媒体隔离、真实WHMCS实例、生产启用授权。
+- 恢复先运行 `git status --short --branch`、`git log -3`，读取本文件及AGENTS，继续未完成检查，不重写已有模块。
