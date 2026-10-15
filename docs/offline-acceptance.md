@@ -55,6 +55,7 @@ go test ./backend/internal/app -run '^TestWHMCSPHPRealHandlerContract$' -count=1
 | Windows `go test -race` | NOT_RUN | 当前 Windows 工具链没有所需 CGO 编译器；同一代码的 Linux race 已在 CI 实际通过 |
 | Linux `scripts/verify.sh`、`scripts/verify-whmcs.sh` | PASS | [CI 38709721860](https://github.com/ygandwx/BarePulse/actions/runs/38709721860)，remote 9e60f9e/local 1319414 相同 tree；完整 race（app 255.262s）、PHP/cURL→Go、7文件lint、54/累计69断言 |
 | Docker Compose 构建、迁移、bootstrap、启动及 HTTP 首链 | PASS | 同次 CI 实际执行 `scripts/compose-smoke.sh`；8项首链断言，独立临时项目清理成功。真实访问双开关为 false；IPMI后续增量见最新进度 |
+| 最终实现 Linux/容器回归（含迁移006） | PASS | [CI 38716675607](https://github.com/ygandwx/BarePulse/actions/runs/38716675607)，remote d4a48a1/local225bf57同树；全套race app25.047s/drivers3.304s、85/80/48 API契约、PHP8文件96/112断言、Compose构建及8项首链 |
 | 浏览器验收、备份恢复演练 | PASS，见实现进度 | 登录与资产／电源、流量、WHMCS门户／介质／保护／释放均实际操作；原开发库及独立故障fixture恢复另行核验 |
 | 真实 SN2410／VyOS／PiKVM／APC／BMC、授权 WHMCS 实例 | NOT_RUN | 缺少本轮实机／实例授权；继续保持真实访问默认关闭 |
 
@@ -79,7 +80,7 @@ OpenAPI 文件使用 JSON 语法（合法 YAML 1.2 子集），不增加 YAML �
 | A11 selected_port 错误回退 1 | `TestPiKVMSelectedPortAndCompleteness`、`TestConsoleUnknownTargetAndMockReconciliation` | fixture/mock PASS。错误不转成端口 1，目标未知时拒绝发票据并阻断交接；真实定制接口尚未验证 |
 | A12 管理端口启禁与冷却 | `TestPiKVMRequestAndCompletion`、`TestPowerCooldownAndRealDevicesRemainDisabled`、`TestMockStateAndFaults` | 离线 PASS。客户不得启禁端口，操作含至少 30 秒冷却；超时仍保留冷却／未知占用。物理收敛时间未实测 |
 | A13 PDU 供电不等于服务器启动 | `TestAPCProfileAndSupplySeparation`、`TestPowerAcceptedIsNotCompletion`、`TestPowerMockScenariosAndSupplySemantics`、`TestRedfishCapabilitiesAndResetEvidence` | 离线语义 PASS。supply_state 与 power_state 分离，reset 后 ON 不证明完成。双 PSU 线路、供电拓扑、实际开机证据 NOT_RUN |
-| A14 伪造服务／端口／头／票据 | `TestWHMCSOwnershipSignatureReplayAndLifecycle`、`TestWHMCSPortalSingleUseAndProtectionOnSuspend`、`TestWHMCSPHPRealHandlerContract`、`TestPowerUnknownFieldsAndOperator`、`TestRuntimePowerApprovalGuards`、`TestRuntimePowerApprovedLoopbackAndSecrets`；PHP `contract.php`／`http_contract.php` | PG、fixture、PHP 与真实 Go handler 跨语言契约 PASS。独立检查 integration/service/client/server 归属，HMAC nonce 与票据单次，浏览器不能选择原始端口或携带设备认证。真实 WHMCS 客户会话／模板渲染尚待授权实例验证 |
+| A14 伪造服务／端口／头／票据 | `TestWHMCSOwnershipSignatureReplayAndLifecycle`、`TestWHMCSPortalSingleUseAndProtectionOnSuspend`、`TestWHMCSPHPRealHandlerContract`、`TestPowerUnknownFieldsAndOperator`、`TestRuntimePowerApprovalGuards`、`TestRuntimePowerApprovedLoopbackAndSecrets`；PHP `contract.php`／`http_contract.php` | PG、fixture、PHP 与真实 Go handler 跨语言契约 PASS。独立检查 integration/service/client/server 归属，HMAC nonce 与票据单次，浏览器不能选择原始端口或携带设备认证。Smarty4/5独立渲染已验；真实WHMCS客户会话与宿主模板整合仍待授权实例验证 |
 | A15 extras／Janus／WebRTC 绕行 | `TestConsoleUnknownTargetAndMockReconciliation`、`TestNetworkDefaultDenyAndRedirect` | 离线 PASS。未实现通道明确 403，重定向和默认网络访问拒绝；没有暴露透明代理。无法据此证明真实 PiKVM 后台服务已隔离 |
 | A16 残留介质／键鼠／票据 | `TestConsoleExclusiveProtectionRestartAndCleanup`、`TestConsoleMediaIsolationProtectionAndRoleRevocation`、`TestConsoleLiveStreamRevokedBeforeHandoff`、`TestSecurityOperatorCannotDeleteMedia` | PG/mock PASS。释放前清除模拟挂载与按键、撤销 token/generation 并关闭旧 SSE，私有 ISO 不能跨客户读取。真实 USB gadget、挂载和视频进程撤销证据 NOT_RUN |
 

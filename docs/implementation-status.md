@@ -5,10 +5,11 @@
 ## 当前工作点
 
 - 分支：`codex/barepulse-implementation`，基线 `0127756`；工作区 `work/BarePulse`。初始仓库无用户改动。
-- 已保存实现检查点：`9783dda`。对应远端快照 `83671d3`，二者 Git tree 完全相同：`98f451ca61a7d8b6614761c6bfd9b9bbe4eba729`。此前 `cb0d7e2`/`bbab42e`、`1319414`/`9e60f9e`、`7afa3c0`/`ac8a4d1` 也已核对同树。
+- 最后实现提交：`225bf575a409430495bd8bd5593368134e18a031`。对应远端快照 `d4a48a16bb376dea09536ccc4fec0fde85d8cda8`，二者 Git tree 完全相同：`d30bdc59cf68e0e19542c9d1b403e4d17e12d0cb`。此前 `9783dda`/`83671d3`、`cb0d7e2`/`bbab42e`、`1319414`/`9e60f9e`、`7afa3c0`/`ac8a4d1` 也已核对同树。
 - 草稿 PR：[BarePulse #1](https://github.com/ygandwx/BarePulse/pull/1)。CLI 没有本地 Git 凭据，改用已授权 GitHub connector 发布，未强推；本地提交历史完整保留。
-- 当前增量：共享成员加入/退出/重入与历史保留、同客户跨账户VLAN观测及覆盖版本校验、迁移006、实际Smarty模板验收、26表备份恢复。
-- 下一条准确任务：发布当前已验证增量，复核该提交的Linux race/PHP/Compose CI；保存最终交付检查点与源码归档。
+- 最后一批实现：共享成员加入/退出/重入与历史保留、同客户跨账户VLAN观测及覆盖版本校验、迁移006、实际Smarty模板验收、26表备份恢复。当前提交只整理交付证据，不再改动代码。
+- 交付状态：约定范围内可执行的离线实现、测试和资料已完成；未提交改动无、未发布代码差异无。CLI不能直接push，但connector发布已完成，保留本地与远端两套提交历史，未覆盖任一历史。最终文档HEAD和归档哈希另记录于交付清单。
+- 下一条准确任务：获得下文列明的固件/有效路由/介质撤销材料后，先在双开关false状态实现真实PiKVM网关适配及本地撤销契约，再进入另行明确授权的设备验收。当前不凭标准上游协议猜测定制固件行为。
 - 当前仅离线代码、本地服务和 loopback/模拟测试；没有真实设备访问或生产部署。
 
 ## 阶段状态
@@ -20,7 +21,7 @@
 | M3 | IMPLEMENTED：PiKVM/Redfish/APC/IPMI，均受明确批准范围约束 | 持久调度、故障与loopback协议契约、IPMI专项及全量原生回归 PASS | BLOCKED：固件/MIB/BMC能力/实际控制未验 |
 | M4 | 离线核心IMPLEMENTED：整机租约、模拟网关、输入、私有介质、保护和清理；真实网关未实现开放 | PG交接/旧流关闭/安全回归、进程重启保护、备份恢复 PASS | BLOCKED：真实视频/WebSocket/WebRTC/介质路由及隔离证据不全；实机网关拒绝开放 |
 | M5 | IMPLEMENTED：映射、签名、门户、PHP模块、停用/轮换和流量图 | Go/PG与PHP契约、17项PHP→真实Go断言、Smarty4/5实际渲染、管理页面 PASS | BLOCKED：实际WHMCS安装实例未提供 |
-| M6 | 离线资料IMPLEMENTED：部署、恢复脚本、运维与验收矩阵；最终发布核对中 | 原生全量验证、26表恢复、Linux race、PHP及容器首链 PASS | BLOCKED：生产/实机未授权 |
+| M6 | 离线资料IMPLEMENTED：部署、恢复脚本、运维与验收矩阵、PR及源码交付 | 原生全量验证、26表恢复、Linux race、PHP及容器首链 PASS | BLOCKED：生产/实机未授权 |
 
 ## 已实现与关键决定
 
@@ -61,6 +62,7 @@
 | [IPMI CI 38712627212](https://github.com/ygandwx/BarePulse/actions/runs/38712627212) | PASS：Linux全套race（app 21.169s、drivers 3.273s）、OpenAPI、PHP及实际Compose首链 | remote bbab42e/local cb0d7e2同树；容器已安装ipmitool 1.8.19，未访问BMC |
 | 电源页面轮询浏览器回归 | PASS：真实operations.js配本地UI夹具，填入核验说明/勾选、展开审计，再插入新任务并等自动刷新后内容均保留 | 只测试UI轮询，不执行任何电源任务；临时服务与页面已关闭 |
 | [图表与轮询CI 38713973740](https://github.com/ygandwx/BarePulse/actions/runs/38713973740) | PASS：Linux race、OpenAPI、PHP及实际Compose首链 | remote83671d3/local9783dda同树；不冒充本次成员增量的CI |
+| [最终实现CI 38716675607](https://github.com/ygandwx/BarePulse/actions/runs/38716675607) | PASS：Linux全量race（app25.047s/drivers3.304s）、85/80/48契约、PHP8文件96/112断言、Compose构建/迁移/bootstrap/启动及8项首链 | remote d4a48a1/local225bf57同树；包含成员历史、迁移006和跨账户观测；未跳过失败项 |
 
 最新主开发库 dump SHA256：`5c415e294359b38b4fab1d588f3041e30db107ca2aaf0af0e7761f0cb931e5f5`；私有备份证据在被忽略的 `work/backup-restore-dev-20261015-03/`。此前01/02演练和独立故障fixture均保留。备份含账户/会话及私有媒体，不发布到Git或交付源码包。服务重启实际使用原dev库，没有替换用户数据库。
 
@@ -68,10 +70,11 @@
 
 ## 续接与交付边界
 
-当前继续执行，没有因额度暂停。最近可靠读数周额度已用53%，仅代表该次读取。
+当前停止点是所有剩余项均依赖外部资料、实例或实机授权，不是阶段完成、上下文压缩或额度暂停。最近可靠读数周额度已用53%，仅代表该次读取，未声称持续监控。
 
-1. 当前代码及离线回归完成；保存、发布并核对tree，检查本次新CI，随后整理最终交付记录。当前未提交内容就是上述成员/观测、Smarty验收和文档增量；没有遗失用户修改。
+1. 代码、测试、迁移和资料已保存；关键回归无遗留失败。Windows race因CGO缺失为NOT_RUN，已由真实Linux CI race补足。实际WHMCS宿主与所有真实设备为NOT_RUN，不冒充通过。第一次CI健康命令失败及修复记录保留在上表。
 2. 本地Git凭据恢复后，先`git fetch origin`，以普通merge整合`origin/codex/barepulse-implementation`，再push；由于connector快照与本地提交哈希不同，禁止用force覆盖任一历史。
 3. 剩余外部条件：具体设备/服务器/端口/动作/窗口授权、固件/MIB/供电拓扑、真实媒体撤销证据、实际WHMCS安装测试实例、生产启用授权。独立Smarty模板已验，不能代替WHMCS宿主兼容性。
-4. 实机网关缺少完整路径/撤销证据时保持blocked；IPMI缺少设备和客户端审批时同样拒绝执行。不能用模拟验收声称真实链路完成。
+4. 真实控制台网关适配尚未完成，入口明确拒绝 `ISOLATION_UNVERIFIED`。需要定制固件的有效认证配置、Nginx include/extras、视频/WebSocket/WebRTC事件、MSD参数/状态及撤销证据；这些材料当前不在仓库，也不能以未授权SSH/HTTP读取补齐。取得材料后可以先继续离线适配开发，真实访问仍须独立授权。IPMI缺少设备和客户端审批时同样拒绝执行。
 5. 续接先读本记录、AGENTS并运行`git status --short --branch`、`git log -3`；从未完成增量和交付检查点继续，不重建已实现模块。
+6. 本地开发应用保留在`127.0.0.1:8080`，PostgreSQL在`127.0.0.1:55432`，使用原`barepulse_dev`。保留1个明确的模拟protected会话，不为清理环境擅自解除保护；私有备份、媒体和工具链留在忽略目录，未纳入源码交付包。源码ZIP和Git bundle可离线续接，不含口令或数据库备份。
