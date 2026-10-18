@@ -6,10 +6,12 @@
 
 - 分支 `codex/barepulse-implementation`；本轮从干净的本地 `7cfcbd3` 继续，最后旧实现 `225bf57`，保留全部已有代码和本地历史。恢复时远端 `ac1e4db` 与本地同 tree `3a5fc2537dd4a3f86d67a9b5202745d8b308eabb`。
 - 草稿 [PR #1](https://github.com/ygandwx/BarePulse/pull/1) 保持开放。开始时最新旧 [CI 38717357757](https://github.com/ygandwx/BarePulse/actions/runs/38717357757) 成功；不把旧 CI 当本轮新代码结果。
-- 本轮首个实现提交 `422beb618264b186d5222bc08220022c2befd08b` 已发布为远端 `f308ebdf51bd9f41ffb3f1953fb582ddd2d3ab77`，同tree `cbb60441785de3cc7e0d94f39fc2d3b34e1f03d6`。集中27项外部依赖、阶段总览、SNMP算法/UDP契约、控制台预检/慢连接撤销及已知PiKVM目标监测已保存。本轮交付工具与CI接入继续集成。
+- 本轮首个实现提交 `422beb618264b186d5222bc08220022c2befd08b` 已发布为远端 `f308ebdf51bd9f41ffb3f1953fb582ddd2d3ab77`，同tree `cbb60441785de3cc7e0d94f39fc2d3b34e1f03d6`。最后实现提交 `93e1b4b356d2fb8a46fad250d88d488ec2fae7e8`（交付工具/CI）对应远端 `6a891726eda3b22116c3f3626965244305604502`，同tree `b497d25f46b71f4f3e6fc62354b4c66693493131`；两批CI均通过。
+- 本轮可执行离线增量已收口；集中27项外部依赖、阶段总览、SNMP算法/UDP契约、控制台预检/撤销、已知目标监测、交付工具及回归已完成。本检查点只补最终证据，准确文档HEAD、远端HEAD和归档哈希写入交付manifest与HANDOFF，避免自引用哈希。
 - 本地 PostgreSQL 重启并完成自身崩溃恢复；继续使用原开发库，没有重建/替换。原模拟 protected 会话及私有媒体保留。
 - 真实设备访问和写操作仍为 false；没有调用真实设备或部署生产。外部材料只在[集中清单](external-dependencies.md)维护，不要求提交密码、token或私钥。
-- 下一条准确任务：发布已核验交付工具增量并检查CI，从干净HEAD导出源码ZIP/bundle/manifest；真实网关剩余适配按 KV-01–KV-04 的材料缺口继续。
+- 下一条准确任务：按 KV-01–KV-04 取得对应定制固件的最小脱敏静态材料，先固定真实鉴权/有效路由和WS/HID或MSD事件的离线夹具，再实现相应通道与强制撤销；保持双设备开关false。缺少材料只阻塞对应适配，不重复已完成的模拟核心。
+- 未提交/未发布说明：实现代码已全部提交且远端同树，最终证据文档随本检查点提交后导出。无待修复的已知失败检查；原始本地commit历史没有被connector同SHA推送，保留在本地和完整bundle中，无强推或PR合并。
 
 ## 阶段状态
 
@@ -23,8 +25,8 @@
 | M4 模拟共享控制台 | IMPLEMENTED：整机锁、保护、私有介质、输入、可撤销SSE、模式预检 | PG/活连接撤销/背压/断线重启 PASS | 模拟不适用实机结论 | [控制台](modules/console.md)、[A08–A11/A16](offline-acceptance.md) | 无已知离线阻塞；不能据此证明真实隔离 | 保留客户隔离、旧连接结束与持久保护回归 |
 | M4 真实共享控制台 | PARTIAL：已知selected_port监测/漂移撤销组件已实现；视频、WS、MSD、Janus网关未完成 | HTTP回环目标监测 PASS；未知通道保持拒绝 | NOT_RUN；入口仍 ISOLATION_UNVERIFIED | [已知固件分析](pikvm-integration.md)、[组件与限制](modules/console.md) | KV-01–04缺有效认证/路由/事件/介质契约；KV-06缺整机隔离和撤销证据 | 先取得对应最小材料，写实际通道离线适配与撤销测试；另行授权后才联调 |
 | M5 WHMCS | IMPLEMENTED：签名、映射、生命周期、门户、PHP模块/流量图 | PG、PHP/cURL→Go、Smarty4/5及浏览器 PASS | 实际有许可WHMCS宿主 NOT_RUN | [WHMCS](modules/whmcs.md)、[A14](offline-acceptance.md) | WH-01–04：宿主版本/主题、隔离实例、传输/秘密注入、角色/生命周期 | 在合法测试实例只接模拟资产，执行宿主权限与主题验收 |
-| M6 离线交付 | IMPLEMENTED：运维/恢复资料、验收矩阵、源码ZIP/bundle/逐文件哈希导出 | 历史26表/媒体恢复 PASS；新交付工具11项真实Git测试 PASS | 不属于生产上线 | [交付工具](modules/delivery.md)、[备份恢复](backup-restore.md)、[离线矩阵](offline-acceptance.md) | 本轮最终发布/归档待集成完成 | 发布分支后从干净HEAD导出，核验tree与manifest |
-| M6 生产上线 | NOT_STARTED，配置默认关闭真实访问及未确认收费/限速/断网/断电 | 配置/Compose离线检查已有PASS；本轮CI待跑 | NOT_RUN，未授权 | [运维](operations.md)、[集中清单](external-dependencies.md) | 设备验收、访问范围、上线审批/回滚/运行责任尚未落实 | 上线前确认条目与审批，不由离线通过自动开启 |
+| M6 离线交付 | IMPLEMENTED：运维/恢复资料、验收矩阵、源码ZIP/bundle/逐文件哈希导出 | 历史26表/媒体恢复 PASS；新工具13项真实Git测试及主仓库110文件导出 PASS | 不属于生产上线 | [交付工具](modules/delivery.md)、[备份恢复](backup-restore.md)、[离线矩阵](offline-acceptance.md) | 无本轮离线阻塞；源码包不能替代生产备份/验收 | 后续改动继续从干净HEAD导出并核对manifest，不复制工作区秘密 |
+| M6 生产上线 | NOT_STARTED，配置默认关闭真实访问及未确认收费/限速/断网/断电 | 本轮配置/Compose独立临时项目检查 PASS | NOT_RUN，未授权 | [运维](operations.md)、[集中清单](external-dependencies.md) | 设备验收、访问范围、上线审批/回滚/运行责任尚未落实 | 上线前确认条目与审批，不由离线通过自动开启 |
 
 ## 本轮新增检查（2026-10-19）
 
@@ -44,6 +46,8 @@
 | [本轮协议/控制台 CI 39149736617](https://github.com/ygandwx/BarePulse/actions/runs/39149736617) | PASS：Linux全套race app25.863s/drivers5.834s，API86/81/56、PHP、Compose构建/迁移/bootstrap与8项首链 | remote f308ebd/local422beb6同树；交付工具接入在下一增量，不能混用为其CI结果 |
 | 交付工具CRLF增量与完整回归 | PASS：13/13，60.560s，无skip；新增定向3.825s | 实际复现干净CRLF误判与archive转码，两处均修复；仅保留有效行尾配置白名单，未继承helpers/filters/任意GIT环境，原工作区不改写 |
 | 文档与前端导入 | PASS：README/docs全部相对文件链接存在，5个实际ES module import | 不把链接检查当作设备协议证明 |
+| [本轮完整实现 CI 39150257321](https://github.com/ygandwx/BarePulse/actions/runs/39150257321) | PASS：Linux全套race app18.492s/drivers5.375s、Node5场景、Git导出13/13（2.334s无skip）、API86/81/56、PHP、Compose八项首链 | remote6a89172/local93e1b4b同树；包含全部本轮实现，无真实设备或生产访问 |
+| 主仓库实际源码导出 | PASS：110文件、逐文件blob/SHA256/ZIP CRC、bundle空库unbundle/fsck/HEAD/tree、本地远端同树 | local93e1b4b；保留系统core.autocrlf=true但源码为提交原字节，原工作区干净且未修改。最终文档快照另导出并记录manifest |
 
 ## 已实现与关键决定
 
@@ -92,7 +96,7 @@
 
 ## 续接与交付边界
 
-2026-10-19 已按新的具体范围恢复开发。以下保留历史交付边界；新代码验收和待办以本轮记录为准，不能沿用旧停止结论。
+2026-10-19 新范围的可执行离线增量已实现并验证；剩余真实通道适配需要集中清单中的定制协议证据，实机/宿主/生产验收还需要相应环境及明确授权。没有因单次提交或上下文压缩停止，也没有为消耗额度扩造任务。
 
 1. 代码、测试、迁移和资料已保存；关键回归无遗留失败。Windows race因CGO缺失为NOT_RUN，已由真实Linux CI race补足。实际WHMCS宿主与所有真实设备为NOT_RUN，不冒充通过。第一次CI健康命令失败及修复记录保留在上表。
 2. 本地Git凭据恢复后，先`git fetch origin`，以普通merge整合`origin/codex/barepulse-implementation`，再push；由于connector快照与本地提交哈希不同，禁止用force覆盖任一历史。

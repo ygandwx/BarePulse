@@ -148,4 +148,4 @@ Real SN2410/VyOS/APC discovery, firmware algorithm availability, actual counters
 and billing direction, real MIB/outlet mappings, management-network packet loss
 and physical power outcome are **NOT_RUN**. They need separately scoped device
 authorization and evidence. Windows race remains unavailable without CGO; Linux
-CI must validate the exact commit containing these changes.
+CI validated these changes in [run 39150257321](https://github.com/ygandwx/BarePulse/actions/runs/39150257321): Linux full-suite race passed (app 18.492s, drivers 5.375s). Remote `6a89172` has the same tree as local `93e1b4b`; this is still offline loopback/PostgreSQL acceptance, not device interoperability.

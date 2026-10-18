@@ -1,5 +1,7 @@
 # 可复现离线源码交付
 
+最终实现的 [Linux CI 39150257321](https://github.com/ygandwx/BarePulse/actions/runs/39150257321) 已通过13项交付工具测试（2.334s，无skip），并通过全部应用race/API/PHP/Compose检查。本地 `93e1b4b` 与远端 `6a89172` 同tree。该快照在主仓库实际导出110文件，ZIP逐文件与完整bundle空库核验均通过，行尾配置为系统 `core.autocrlf=true`；最终证据文档快照与归档SHA另在交付manifest记录。
+
 `scripts/export-offline-package.py` 只从当前仓库**已提交的 HEAD**生成源码 ZIP、完整历史 Git bundle 和逐文件清单。需要 Python 3.10+ 与本地 Git，不依赖 PostgreSQL、Docker、第三方 Python 包或网络。它不执行应用测试、不读取真实设备、不部署、不发布，也不替代[数据库与媒体备份恢复](../backup-restore.md)。
 
 ## 导出命令
