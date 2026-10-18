@@ -1,0 +1,7 @@
+.env
+work/
+bin/
+*.exe
+*.log
+coverage.out
+node_modules/

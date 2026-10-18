@@ -1,0 +1,40 @@
+name: barepulse
+services:
+  db:
+    image: postgres:18.6-bookworm
+    environment:
+      POSTGRES_USER: barepulse
+      POSTGRES_DB: barepulse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U barepulse -d barepulse"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://barepulse:${POSTGRES_PASSWORD}@db:5432/barepulse?sslmode=disable
+      BASE_URL: ${BASE_URL:-http://127.0.0.1:8080}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      ALLOW_REAL_DEVICES: "false"
+      ALLOW_DEVICE_WRITES: "false"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-2000000000}
+      BAREPULSE_WHMCSTEST_SECRET: ${BAREPULSE_WHMCSTEST_SECRET:-}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    volumes:
+      - media:/var/lib/barepulse/media
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  postgres:
+  media:
