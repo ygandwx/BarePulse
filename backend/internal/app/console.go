@@ -47,6 +47,7 @@ func (a *App) consoleSession(ctx context.Context, id string, u User) (ConsoleSes
 	return s, nil
 }
 func (a *App) registerConsole() {
+	a.route("GET /api/v1/servers/{id}/console-readiness", false, a.consoleReadiness)
 	a.route("POST /api/v1/console-sessions/{id}/reconcile", true, a.reconcileMockConsole)
 	a.route("GET /api/v1/console-sessions", false, func(w http.ResponseWriter, r *http.Request, u User) error {
 		rows, e := a.DB.Query(r.Context(), `SELECT `+consoleColumns+` FROM console_sessions WHERE ($1='admin' OR (actor_id=$2 AND EXISTS(SELECT 1 FROM servers s WHERE s.id=console_sessions.server_id AND s.owner_id=$2))) ORDER BY created_at DESC LIMIT 200`, u.Role, u.ID)
@@ -621,13 +622,27 @@ func (a *App) consoleEvents(w http.ResponseWriter, r *http.Request, u User) erro
 	if e != nil {
 		return e
 	}
-	f, ok := w.(http.Flusher)
-	if !ok {
+	rc := http.NewResponseController(w)
+	// Cancellation alone does not interrupt a ResponseWriter blocked by a slow
+	// client. Bound each write and actively expire its deadline on revocation.
+	if e = rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); e != nil {
 		return fail(500, "STREAM_UNAVAILABLE", "Streaming unavailable")
 	}
 	id := newID()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	interrupted := make(chan struct{})
+	stopInterrupt := context.AfterFunc(ctx, func() {
+		defer close(interrupted)
+		// Give a responsive client enough time for net/http's terminating
+		// chunk; a blocked writer still exits within this bounded grace.
+		_ = rc.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
+	})
+	defer func() {
+		if !stopInterrupt() {
+			<-interrupted
+		}
+	}()
 	if _, e = a.DB.Exec(ctx, `INSERT INTO gateway_connections(id,session_id,generation) VALUES($1,$2,$3)`, id, s.ID, s.Generation); e != nil {
 		return e
 	}
@@ -648,7 +663,9 @@ func (a *App) consoleEvents(w http.ResponseWriter, r *http.Request, u User) erro
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(200)
-	f.Flush()
+	if e = rc.Flush(); e != nil {
+		return nil
+	}
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -656,7 +673,7 @@ func (a *App) consoleEvents(w http.ResponseWriter, r *http.Request, u User) erro
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			current, e := a.gatewayAuth(r, u)
+			current, e := a.gatewayAuth(r.WithContext(ctx), u)
 			if e != nil || current.Generation != s.Generation {
 				return nil
 			}
@@ -666,10 +683,15 @@ func (a *App) consoleEvents(w http.ResponseWriter, r *http.Request, u User) erro
 				return nil
 			}
 			b, _ := json.Marshal(map[string]any{"simulated": true, "server_id": s.ServerID, "port": s.Port, "frame": frame, "generation": s.Generation, "observed_at": time.Now().UTC()})
+			if e = rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); e != nil || ctx.Err() != nil {
+				return nil
+			}
 			if _, e = fmt.Fprintf(w, "event: frame\ndata: %s\n\n", b); e != nil {
 				return nil
 			}
-			f.Flush()
+			if e = rc.Flush(); e != nil {
+				return nil
+			}
 		}
 	}
 }

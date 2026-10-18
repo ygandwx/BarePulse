@@ -1,27 +1,46 @@
 # BarePulse 实现进度与续接记录
 
-更新时间：2026-10-15（Asia/Shanghai）。代码、离线验证和实机证据分别记录。
+更新时间：2026-10-19（Asia/Shanghai）。实现、离线验证、真实验收与生产启用独立记录。
 
 ## 当前工作点
 
-- 分支：`codex/barepulse-implementation`，基线 `0127756`；工作区 `work/BarePulse`。初始仓库无用户改动。
-- 最后实现提交：`225bf575a409430495bd8bd5593368134e18a031`。对应远端快照 `d4a48a16bb376dea09536ccc4fec0fde85d8cda8`，二者 Git tree 完全相同：`d30bdc59cf68e0e19542c9d1b403e4d17e12d0cb`。此前 `9783dda`/`83671d3`、`cb0d7e2`/`bbab42e`、`1319414`/`9e60f9e`、`7afa3c0`/`ac8a4d1` 也已核对同树。
-- 草稿 PR：[BarePulse #1](https://github.com/ygandwx/BarePulse/pull/1)。CLI 没有本地 Git 凭据，改用已授权 GitHub connector 发布，未强推；本地提交历史完整保留。
-- 最后一批实现：共享成员加入/退出/重入与历史保留、同客户跨账户VLAN观测及覆盖版本校验、迁移006、实际Smarty模板验收、26表备份恢复。当前提交只整理交付证据，不再改动代码。
-- 交付状态：约定范围内可执行的离线实现、测试和资料已完成；未提交改动无、未发布代码差异无。CLI不能直接push，但connector发布已完成，保留本地与远端两套提交历史，未覆盖任一历史。最终文档HEAD和归档哈希另记录于交付清单。
-- 下一条准确任务：获得下文列明的固件/有效路由/介质撤销材料后，先在双开关false状态实现真实PiKVM网关适配及本地撤销契约，再进入另行明确授权的设备验收。当前不凭标准上游协议猜测定制固件行为。
-- 当前仅离线代码、本地服务和 loopback/模拟测试；没有真实设备访问或生产部署。
+- 分支 `codex/barepulse-implementation`；本轮从干净的本地 `7cfcbd3` 继续，最后旧实现 `225bf57`，保留全部已有代码和本地历史。恢复时远端 `ac1e4db` 与本地同 tree `3a5fc2537dd4a3f86d67a9b5202745d8b308eabb`。
+- 草稿 [PR #1](https://github.com/ygandwx/BarePulse/pull/1) 保持开放。开始时最新旧 [CI 38717357757](https://github.com/ygandwx/BarePulse/actions/runs/38717357757) 成功；不把旧 CI 当本轮新代码结果。
+- 本轮完成：集中27项外部依赖、逐阶段证据与阻塞总览、SNMP显式算法和真实UDP回环契约、控制台只读预检/慢客户端撤销、已知PiKVM目标监测组件、可复现源码交付工具。当前正在集成验证；提交/远端/最终归档记录随后更新。
+- 本地 PostgreSQL 重启并完成自身崩溃恢复；继续使用原开发库，没有重建/替换。原模拟 protected 会话及私有媒体保留。
+- 真实设备访问和写操作仍为 false；没有调用真实设备或部署生产。外部材料只在[集中清单](external-dependencies.md)维护，不要求提交密码、token或私钥。
+- 下一条准确任务：完成本轮前端浏览器检查、全仓回归和交付工具CI，提交并发布已核验增量；真实网关剩余适配按 KV-01–KV-04 的材料缺口继续。
 
 ## 阶段状态
 
-| 阶段 | 代码 | 离线验证 | 实机/外部 |
-| --- | --- | --- | --- |
-| M1 | IMPLEMENTED | PostgreSQL、浏览器首链、OpenAPI PASS | 不适用 |
-| M2 | IMPLEMENTED，含成员历史、同客户跨账户观测和升级迁移 | 三台独立/共享、精确账本、并发去重、质量、成员并发、旧库升级、模拟采集、浏览器 PASS | BLOCKED：SN2410/VyOS未授权 |
-| M3 | IMPLEMENTED：PiKVM/Redfish/APC/IPMI，均受明确批准范围约束 | 持久调度、故障与loopback协议契约、IPMI专项及全量原生回归 PASS | BLOCKED：固件/MIB/BMC能力/实际控制未验 |
-| M4 | 离线核心IMPLEMENTED：整机租约、模拟网关、输入、私有介质、保护和清理；真实网关未实现开放 | PG交接/旧流关闭/安全回归、进程重启保护、备份恢复 PASS | BLOCKED：真实视频/WebSocket/WebRTC/介质路由及隔离证据不全；实机网关拒绝开放 |
-| M5 | IMPLEMENTED：映射、签名、门户、PHP模块、停用/轮换和流量图 | Go/PG与PHP契约、17项PHP→真实Go断言、Smarty4/5实际渲染、管理页面 PASS | BLOCKED：实际WHMCS安装实例未提供 |
-| M6 | 离线资料IMPLEMENTED：部署、恢复脚本、运维与验收矩阵、PR及源码交付 | 原生全量验证、26表恢复、Linux race、PHP及容器首链 PASS | BLOCKED：生产/实机未授权 |
+`IMPLEMENTED` 表示所述代码存在；`PARTIAL` 明确保留未实现部分。`PASS` 仅指链接所列实际测试。`NOT_RUN` 不等于失败，也不等于通过。此表不把模拟控制台或离线包算作生产完成。
+
+| 阶段/范围 | 代码实现 | 离线测试 | 真实设备/外部验收 | 证据 | 阻塞原因 | 下一步 |
+| --- | --- | --- | --- | --- | --- | --- |
+| M1 资产、登录、绑定、任务审计 | IMPLEMENTED | PG/首链/浏览器 PASS | 本地首链不需设备；生产部署 NOT_RUN | [基础模块](modules/foundation.md)、[A07/A14](offline-acceptance.md)、下方检查记录 | 无离线实现阻塞；生产入口另需部署授权 | 保留首链回归；生产前确认TLS/账户/备份 |
+| M2 流量与额度 | IMPLEMENTED：成员历史、不可重复账本、观测隔离、显式SNMPv3算法 | PG并发/升级/精确字节 PASS；UDP多页/认证/异常 PASS | SN2410/VyOS NOT_RUN | [流量](modules/traffic.md)、[SNMP](modules/snmp.md)、[A01–A04](offline-acceptance.md) | SN-01–04、VY-01–03：版本、算法、映射、计数方向/重启证据 | 取得静态证据后建精确采集配置；获授权再核对只读样本 |
+| M3 电源驱动 | IMPLEMENTED：PiKVM、APC、Redfish、IPMI；持久unknown与单次派发 | PG幂等/串行、HTTP/UDP/子进程故障 PASS | 所有真实电源动作 NOT_RUN | [驱动](modules/drivers.md)、[IPMI](modules/ipmi.md)、[SNMP](modules/snmp.md)、[A05/A06/A12/A13](offline-acceptance.md) | AP-01–04、BMC-01–05、KV-05/KV-07：MIB/能力/接线/批准范围与物理完成证据 | 使用脱敏材料补精确profile；不补猜测OID，不补发超时动作 |
+| M4 模拟共享控制台 | IMPLEMENTED：整机锁、保护、私有介质、输入、可撤销SSE、模式预检 | PG/活连接撤销/背压/断线重启 PASS | 模拟不适用实机结论 | [控制台](modules/console.md)、[A08–A11/A16](offline-acceptance.md) | 无已知离线阻塞；不能据此证明真实隔离 | 保留客户隔离、旧连接结束与持久保护回归 |
+| M4 真实共享控制台 | PARTIAL：已知selected_port监测/漂移撤销组件已实现；视频、WS、MSD、Janus网关未完成 | HTTP回环目标监测 PASS；未知通道保持拒绝 | NOT_RUN；入口仍 ISOLATION_UNVERIFIED | [已知固件分析](pikvm-integration.md)、[组件与限制](modules/console.md) | KV-01–04缺有效认证/路由/事件/介质契约；KV-06缺整机隔离和撤销证据 | 先取得对应最小材料，写实际通道离线适配与撤销测试；另行授权后才联调 |
+| M5 WHMCS | IMPLEMENTED：签名、映射、生命周期、门户、PHP模块/流量图 | PG、PHP/cURL→Go、Smarty4/5及浏览器 PASS | 实际有许可WHMCS宿主 NOT_RUN | [WHMCS](modules/whmcs.md)、[A14](offline-acceptance.md) | WH-01–04：宿主版本/主题、隔离实例、传输/秘密注入、角色/生命周期 | 在合法测试实例只接模拟资产，执行宿主权限与主题验收 |
+| M6 离线交付 | IMPLEMENTED：运维/恢复资料、验收矩阵、源码ZIP/bundle/逐文件哈希导出 | 历史26表/媒体恢复 PASS；新交付工具11项真实Git测试 PASS | 不属于生产上线 | [交付工具](modules/delivery.md)、[备份恢复](backup-restore.md)、[离线矩阵](offline-acceptance.md) | 本轮最终发布/归档待集成完成 | 发布分支后从干净HEAD导出，核验tree与manifest |
+| M6 生产上线 | NOT_STARTED，配置默认关闭真实访问及未确认收费/限速/断网/断电 | 配置/Compose离线检查已有PASS；本轮CI待跑 | NOT_RUN，未授权 | [运维](operations.md)、[集中清单](external-dependencies.md) | 设备验收、访问范围、上线审批/回滚/运行责任尚未落实 | 上线前确认条目与审批，不由离线通过自动开启 |
+
+## 本轮新增检查（2026-10-19）
+
+| 检查 | 实际结果 | 证据范围与限制 |
+| --- | --- | --- |
+| SNMP驱动协议测试 | PASS 2.775s；25算法组合，12类SET故障，独立HMAC/密钥扩展核验 | [测试映射](modules/snmp.md)；loopback UDP，非厂商互通 |
+| SNMP/流量/电源相关app回归 | PASS 15.166s，使用实际专用PG | 大整数、多页、共享显式配置；真实SNMP未访问 |
+| 控制台预检与背压回归 | PASS 7.400s | [预检](../backend/internal/app/console_readiness_test.go)、[真实HTTP背压](../backend/internal/app/console_backpressure_test.go)；保留旧正常EOF断言 |
+| PiKVM目标监测 | PASS 3.569s | [HTTP回环测试](../backend/internal/drivers/pikvm_console_guard_test.go)；监测未接入真实客户入口，不能证明物理隔离 |
+| 全仓 scripts/verify.ps1（PG、PHP/cURL已配置） | PASS：app44.742s/drivers4.531s，gofmt、vet、build、JS syntax | Windows无CGO race单列NOT_RUN；Linux新CI待执行 |
+| 可复现交付工具 | PASS 11/11，54.161s，无skip | [真实Git夹具](../scripts/tests/test_export_offline_package.py)；工具验证归档，应用测试声明单独标记 |
+| 集中依赖清单 | PASS：27唯一编号、77本地链接、5 JSON模板、14配对代码围栏 | [缺口及安全取证](external-dependencies.md)；指令仅供另行授权执行，未连设备 |
+| 预检审查后回归 | PASS：PG 5.107s，Node 5场景 | 暂停/终止服务解释原因，恢复后可申请且跨客户仍404；旧成功/旧失败/unmount不覆盖当前页面，真实动作权限未放宽 |
+| OpenAPI检查 | PASS：86操作/81路由/56验收测试引用 | 新增只读预检JSON与认证契约 |
+| 浏览器本轮流程 | PASS：登录、未绑定禁用、模拟模式/占用提示、真实模式拒绝、原protected保留，error日志为空 | 仅新增DEMO-READINESS-REAL和文档示例地址设备的本地绑定；无真实请求。截图barepulse-console-readiness-20261019.png留在交付outputs |
+| PHP离线回归 | PASS：8文件lint、96 stub、112累计HTTP断言 | 不代表真实WHMCS宿主通过 |
 
 ## 已实现与关键决定
 
@@ -37,7 +56,7 @@
 - WHMCS 图表使用API的真实 intervals/samples，最多200区间/100样本；未采集不画为零，恢复/跨周期区间以虚线显示，精确字节不经过浮点额度计算。
 - Go 1.27.2 / PostgreSQL 18.6 / pgx v5.7.6 / gosnmp v1.45.0 / x/crypto v0.41.0；前端同源原生ES modules，无npm构建。秘密仅外部profile/环境引用，避免写入响应和审计。
 
-## 实际检查记录
+## 历史检查记录（2026-10-15）
 
 | 检查 | 实际结果 | 限制 |
 | --- | --- | --- |
@@ -70,11 +89,11 @@
 
 ## 续接与交付边界
 
-当前停止点是所有剩余项均依赖外部资料、实例或实机授权，不是阶段完成、上下文压缩或额度暂停。最近可靠读数周额度已用53%，仅代表该次读取，未声称持续监控。
+2026-10-19 已按新的具体范围恢复开发。以下保留历史交付边界；新代码验收和待办以本轮记录为准，不能沿用旧停止结论。
 
 1. 代码、测试、迁移和资料已保存；关键回归无遗留失败。Windows race因CGO缺失为NOT_RUN，已由真实Linux CI race补足。实际WHMCS宿主与所有真实设备为NOT_RUN，不冒充通过。第一次CI健康命令失败及修复记录保留在上表。
 2. 本地Git凭据恢复后，先`git fetch origin`，以普通merge整合`origin/codex/barepulse-implementation`，再push；由于connector快照与本地提交哈希不同，禁止用force覆盖任一历史。
-3. 剩余外部条件：具体设备/服务器/端口/动作/窗口授权、固件/MIB/供电拓扑、真实媒体撤销证据、实际WHMCS安装测试实例、生产启用授权。独立Smarty模板已验，不能代替WHMCS宿主兼容性。
+3. 剩余外部条件统一由[外部依赖清单](external-dependencies.md)维护。独立Smarty模板已验，不能代替WHMCS宿主兼容性。
 4. 真实控制台网关适配尚未完成，入口明确拒绝 `ISOLATION_UNVERIFIED`。需要定制固件的有效认证配置、Nginx include/extras、视频/WebSocket/WebRTC事件、MSD参数/状态及撤销证据；这些材料当前不在仓库，也不能以未授权SSH/HTTP读取补齐。取得材料后可以先继续离线适配开发，真实访问仍须独立授权。IPMI缺少设备和客户端审批时同样拒绝执行。
 5. 续接先读本记录、AGENTS并运行`git status --short --branch`、`git log -3`；从未完成增量和交付检查点继续，不重建已实现模块。
 6. 本地开发应用保留在`127.0.0.1:8080`，PostgreSQL在`127.0.0.1:55432`，使用原`barepulse_dev`。保留1个明确的模拟protected会话，不为清理环境擅自解除保护；私有备份、媒体和工具链留在忽略目录，未纳入源码交付包。源码ZIP和Git bundle可离线续接，不含口令或数据库备份。

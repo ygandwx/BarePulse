@@ -141,8 +141,12 @@ func (a *App) powerProfile(target drivers.Target, serverID, action, reference st
 		if strings.TrimPrefix(p.SNMP.DiscoveryOID, ".") != strings.TrimPrefix(outlet.StateOID, ".") {
 			return zero, fail(409, "DEVICE_PROFILE_INVALID", "SNMP discovery must use the confirmed read-only outlet state OID")
 		}
-		if _, _, err := snmpPowerAlgorithms(p.SNMP); err != nil {
+		auth, privacy, err := snmpPowerAlgorithms(p.SNMP)
+		if err != nil {
 			return zero, err
+		}
+		if err := drivers.ValidateSNMPv3Security(p.Username, p.SNMP.AuthPassword, p.SNMP.PrivacyPassword, auth, privacy); err != nil {
+			return zero, fail(409, "DEVICE_PROFILE_INVALID", "Bounded SNMPv3 AuthPriv credentials are required")
 		}
 	default:
 		return zero, fail(409, "CAPABILITY_UNSUPPORTED", "No verified physical driver is available for this device kind")
@@ -168,9 +172,9 @@ func snmpPowerAlgorithms(p *PowerSNMPProfile) (gosnmp.SnmpV3AuthProtocol, gosnmp
 	if p == nil {
 		return 0, 0, fail(409, "DEVICE_PROFILE_INVALID", "SNMPv3 profile is required")
 	}
-	auth, authOK := map[string]gosnmp.SnmpV3AuthProtocol{"SHA": gosnmp.SHA, "SHA224": gosnmp.SHA224, "SHA256": gosnmp.SHA256, "SHA384": gosnmp.SHA384, "SHA512": gosnmp.SHA512}[p.AuthProtocol]
-	privacy, privacyOK := map[string]gosnmp.SnmpV3PrivProtocol{"AES": gosnmp.AES, "AES192": gosnmp.AES192, "AES256": gosnmp.AES256}[p.PrivacyProtocol]
-	if !authOK || !privacyOK || p.AuthPassword == "" || p.PrivacyPassword == "" || p.DiscoveryOID == "" {
+	auth, privacy, err := drivers.ParseSNMPv3Algorithms(p.AuthProtocol, p.PrivacyProtocol)
+	// Username is separately validated on the resolved profile and transport.
+	if err != nil || drivers.ValidateSNMPv3Security("profile-validation", p.AuthPassword, p.PrivacyPassword, auth, privacy) != nil || p.DiscoveryOID == "" {
 		return 0, 0, fail(409, "DEVICE_PROFILE_INVALID", "Explicit SNMPv3 AuthPriv algorithms, passphrases and discovery OID are required")
 	}
 	return auth, privacy, nil
@@ -195,6 +199,9 @@ func configuredPowerDriver(p PowerProfile) (drivers.Driver, error) {
 		auth, privacy, err := snmpPowerAlgorithms(p.SNMP)
 		if err != nil {
 			return nil, err
+		}
+		if err := drivers.ValidateSNMPv3Security(p.Username, p.SNMP.AuthPassword, p.SNMP.PrivacyPassword, auth, privacy); err != nil {
+			return nil, fail(409, "DEVICE_PROFILE_INVALID", "Bounded SNMPv3 AuthPriv credentials are required")
 		}
 		transport := &drivers.SNMPV3Transport{AllowReal: true, AllowWrites: true, AllowedTargets: []string{p.Endpoint}, Username: p.Username, AuthPassword: p.SNMP.AuthPassword, PrivacyPassword: p.SNMP.PrivacyPassword, AuthProtocol: auth, PrivacyProtocol: privacy, DiscoveryOID: p.SNMP.DiscoveryOID, Timeout: 3 * time.Second}
 		return &drivers.APC{Profile: *p.APC, Transport: transport, AllowReads: true, AllowWrites: true}, nil

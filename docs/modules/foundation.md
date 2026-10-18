@@ -29,7 +29,7 @@
 | POST `/api/v1/tasks/{id}/resolve` | 管理员离线模拟结果核对，保留证据 |
 | GET `/api/v1/audit` | 管理员全部审计，客户／operator 自己的操作审计 |
 
-`POST power-actions` 仅接受 `{ "action": "power_on" }` 形式，不接受设备、端口、地址等目标字段。动作按设备能力提供：PiKVM／BMC 的 `power_on`、`request_shutdown`、`hard_reset`；PDU 的 `power_on`、`power_cycle`；模拟 BMC／Redfish 还提供 `power_cycle`，Redfish 执行前核对设备声明。PiKVM 管理员额外有 `enable_port`、`disable_port`。客户不能调用端口维护动作。IPMI 尚无核实命令能力，返回空动作列表。真实控制器的更细能力发现与接线条件须在实机授权阶段核对。
+`POST power-actions` 仅接受 `{ "action": "power_on" }` 形式，不接受设备、端口、地址等目标字段。动作按设备能力提供：PiKVM／BMC 的 `power_on`、`request_shutdown`、`hard_reset`；PDU 的 `power_on`、`power_cycle`；模拟 BMC／Redfish 还提供 `power_cycle`，Redfish 执行前核对设备声明。PiKVM 管理员额外有 `enable_port`、`disable_port`。客户不能调用端口维护动作。IPMI 仅在有效外部批准profile与已核验客户端配置下提供动作，详见 [IPMI模块](ipmi.md)。真实控制器的更细能力发现与接线条件须在实机授权阶段核对。
 
 ## 任务正确性与恢复
 
@@ -81,4 +81,4 @@ go test ./backend/internal/app -run 'Test(Inventory|Binding|Power|RuntimePower)'
 
 秘密文件由部署端受限挂载到进程，只在内存使用，不提交 Git 或发送浏览器；JSON 不执行环境变量替换。HTTP 端点限制为登记的 HTTPS IP origin，不接受 URL 内认证、任意路径、查询或 DNS 名称。TLS 采用系统信任且不提供关闭证书校验开关。PiKVM 额外要求 `mapping_verified:true`。Redfish 要求 `redfish_system_path` 指向已确认的 `/redfish/v1/Systems/<id>`，执行时再次核对动作能力和系统身份，不选择发现结果的第一台机器。
 
-APC 要求 `apc_profile` 包含 `confirmed/model/firmware/evidence/outlets`；每个插座包含核实的 `state_oid/control_oid/state_values/actions`。不内置任何猜测 OID 或控制枚举。`snmp_v3` 明确指定 `auth_protocol`（SHA/SHA224/SHA256/SHA384/SHA512）、`privacy_protocol`（AES/AES192/AES256）、两条口令及 `discovery_oid`；discovery 必须是该插座已确认的只读状态 OID。目标为登记的 IP 或 IP:端口，认证必须 AuthPriv。IPMI 保持明确不支持，不会自动替换为其它驱动重试。
+APC 要求 `apc_profile` 包含 `confirmed/model/firmware/evidence/outlets`；每个插座包含核实的 `state_oid/control_oid/state_values/actions`。不内置任何猜测 OID 或控制枚举。`snmp_v3` 明确指定 `auth_protocol`（SHA/SHA224/SHA256/SHA384/SHA512）、`privacy_protocol`（AES/AES192/AES256/AES192C/AES256C，差异见[SNMP配置](snmp.md)）、两条口令及 `discovery_oid`；discovery 必须是该插座已确认的只读状态 OID。目标为登记的 IP 或 IP:端口，认证必须 AuthPriv。IPMI 已有受控客户端适配与离线契约测试；缺少批准或客户端核验时拒绝，不会自动替换驱动重试。

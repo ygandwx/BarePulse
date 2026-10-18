@@ -8,6 +8,7 @@
 
 ```sh
 python3 api/check_contract.py
+python3 -B -m unittest discover -s scripts/tests -p test_export_offline_package.py -v
 sh scripts/verify.sh
 sh scripts/verify-whmcs.sh
 ```
@@ -69,15 +70,15 @@ OpenAPI 文件使用 JSON 语法（合法 YAML 1.2 子集），不增加 YAML �
 | --- | --- | --- |
 | A01 同 VLAN 三台独立额度 | `TestTrafficPGThreeIndependentAccountsSameVLAN`、`TestTrafficPGObservationOverlapAndBindingDrift`、`TestTrafficPGConstraintsSerializeOverlap`、`TestTrafficPGIndependentVLANObservationIsolation` | 精确三台 PG 场景 PASS：同 domain/VLAN 300，三个账户各含一个成员，各端口独立记账，恰好 3 条 ledger；VLAN 主源重复被拒绝，同客户跨独立账户observation可汇总但不入账。覆盖成员转客户后停止采集、隐藏客户观察数据；未确认新端口不能扩大覆盖。真实拓扑/方向需授权核验 |
 | A02 三台共享额度 | `TestTrafficPGThreeSharedMembersExactReplay`、`TestTrafficPGSharedPortsAndBoundaryHold`、`TestTrafficPGAccountingReplayOwnershipAndAdjustments` | 精确三成员 PG 场景 PASS：upload 606、download 1842、used 2448；每个末样本重放 3 次仍只有 6 个样本／3 条 ledger；三个服务器入口指向同账户，跨客户 404、跨 owner 组建 409。实机完整覆盖范围需授权确认 |
-| A03 重启／中断／ifIndex 变更 | `TestTrafficCounterQualityAndPrecision`、`TestTrafficPGQualitySequenceAndMockCollector`、`TestTrafficPGMemberVersionRefreshKeepsHistory`、`TestTrafficSNMPReadOnlyContract` | 离线 PASS。复位、discontinuity、重映射分别标质量，重新建立基线，不生成巨额或零流量。真实固件 IF-MIB 响应与映射尚未验证 |
+| A03 重启／中断／ifIndex 变更 | `TestTrafficCounterQualityAndPrecision`、`TestTrafficPGQualitySequenceAndMockCollector`、`TestTrafficPGMemberVersionRefreshKeepsHistory`、`TestTrafficSNMPReadOnlyContract`、`TestSNMPTrafficUDPCollectAndDiscover` | 离线 PASS。复位、discontinuity、重映射分别标质量，重新建立基线，不生成巨额或零流量。真实固件 IF-MIB 响应与映射尚未验证 |
 | A04 漏采跨周期／重跑／额度调整 | `TestTrafficCycleBoundaryIsNotInvented`、`TestTrafficPGAccountingReplayOwnershipAndAdjustments`、`TestTrafficPGSharedPortsAndBoundaryHold`、`TestTrafficPGMemberTransferKeepsSharedPeriod`、`TestTrafficPGMemberConcurrentJoinExitAndCollect`、`TestTrafficPGLegacyMembershipMigrationPreservesData` | 离线 PASS。重复样本唯一入账，冲突重放拒绝；跨周期差值保留 `boundary_unallocated`，不猜分；调整保留原因与幂等键。成员退出/重入保留历史区间及当期quota/ledger；并发加入、退出与采集序列化；真实001–005旧数据升级006前后指纹一致并继续入账 |
-| A05 电源重复／超时／worker 重启 | `TestPowerIdempotencyOwnershipAndExecution`、`TestPowerUnknownBlocksAndRestartDoesNotReplay`、`TestPowerRecoveryAndDeviceSerialization`、`TestPiKVMTimeoutSentOnce`、`TestSNMPWriteFenceAndValidation`、`TestRuntimeIPMIDurableDispatchAndRevocation`、`TestIPMIAmbiguousWriteNeverRetriesOrLeaksOutput` | 离线 PASS。超时为 unknown、保留设备锁且不自动重发；SNMP 写保护禁止库内部重发 SET；IPMI 指令一次尝试、审批撤销阻止派发、uncertain任务幂等及阻断。实机超时后最终物理状态另需授权观察 |
+| A05 电源重复／超时／worker 重启 | `TestPowerIdempotencyOwnershipAndExecution`、`TestPowerUnknownBlocksAndRestartDoesNotReplay`、`TestPowerRecoveryAndDeviceSerialization`、`TestPiKVMTimeoutSentOnce`、`TestSNMPWriteFenceAndValidation`、`TestSNMPv3UDPWriteFailuresNeverResend`、`TestRuntimeIPMIDurableDispatchAndRevocation`、`TestIPMIAmbiguousWriteNeverRetriesOrLeaksOutput` | 离线 PASS。超时为 unknown、保留设备锁且不自动重发；SNMP 写保护禁止库内部重发 SET；IPMI 指令一次尝试、审批撤销阻止派发、uncertain任务幂等及阻断。实机超时后最终物理状态另需授权观察 |
 | A06 PiKVM 200 内层失败／缺状态 | `TestPiKVMRejectsInnerFailures`、`TestPiKVMRequestAndCompletion`、`TestPowerMockScenariosAndSupplySemantics` | fixture PASS。HTTP 成功不能替代业务成功；缺失／非法 status、error、res 与返回格式均受检查。定制固件实际响应未调用验证 |
 | A07 排队后绑定／归属变化 | `TestPowerBindingChangeAndDeviceChangeRejectDispatch`、`TestInventoryOwnershipConflictsAndHistory`、`TestSecuritySessionListHidesReassignedAssets` | PG PASS。server/device/binding 版本及客户归属在执行前复核，旧任务不能作用到新目标；历史绑定保留 |
-| A08 同 PiKVM 两客户竞争 | `TestConsoleExclusiveProtectionRestartAndCleanup` | PG/mock PASS。整机唯一占用覆盖所有端口；第二客户排队，第一客户保护期间不切换。真实视频、键鼠和媒体整机隔离尚未验证 |
-| A09 旧连接撤销后才能交接 | `TestConsoleLiveStreamRevokedBeforeHandoff`、`TestConsoleUnknownTargetAndMockReconciliation`、`TestSecurityInputRevalidatesAfterBodyRead` | 模拟 SSE 活连接关闭、generation 失效和事务内输入复核 PASS。真实 WebSocket／视频／WebRTC 尚未实现转发或验证，真实控制台入口保持 `ISOLATION_UNVERIFIED` |
+| A08 同 PiKVM 两客户竞争 | `TestConsoleExclusiveProtectionRestartAndCleanup`、`TestConsoleReadinessIsScopedAndNeverProbesDevices`、`TestConsoleReadinessTracksMaintenanceBindingAndRole` | PG/mock PASS。整机唯一占用覆盖所有端口；第二客户排队，第一客户保护期间不切换。真实视频、键鼠和媒体整机隔离尚未验证 |
+| A09 旧连接撤销后才能交接 | `TestConsoleLiveStreamRevokedBeforeHandoff`、`TestConsoleRevocationInterruptsBlockedHTTPWrite`、`TestConsoleUnknownTargetAndMockReconciliation`、`TestSecurityInputRevalidatesAfterBodyRead` | 模拟 SSE 活连接关闭、generation 失效和事务内输入复核 PASS。真实 WebSocket／视频／WebRTC 尚未实现转发或验证，真实控制台入口保持 `ISOLATION_UNVERIFIED` |
 | A10 装机／BIOS 保护跨断线重启 | `TestConsoleExclusiveProtectionRestartAndCleanup`、`TestConsoleMediaIsolationProtectionAndRoleRevocation`、`TestWHMCSPortalSingleUseAndProtectionOnSuspend`、`TestSecuritySuspendedCustomerCannotClearProtection` | PG/mock PASS。到期与 App 重建不自动释放 protected，会话暂停撤权而保留装机保护。不是物理刷 BIOS／装机测试；进程级重启与备份恢复由主任务另记 |
-| A11 selected_port 错误回退 1 | `TestPiKVMSelectedPortAndCompleteness`、`TestConsoleUnknownTargetAndMockReconciliation` | fixture/mock PASS。错误不转成端口 1，目标未知时拒绝发票据并阻断交接；真实定制接口尚未验证 |
+| A11 selected_port 错误回退 1 | `TestPiKVMSelectedPortAndCompleteness`、`TestPiKVMConsoleGuardLatchesDriftAndUnknown`、`TestPiKVMConsoleGuardCloseCancelsInFlightRead`、`TestPiKVMConsoleGuardRejectsBeforeNetwork`、`TestConsoleUnknownTargetAndMockReconciliation` | fixture/mock PASS。错误不转成端口 1，目标未知时拒绝发票据并阻断交接；真实定制接口尚未验证 |
 | A12 管理端口启禁与冷却 | `TestPiKVMRequestAndCompletion`、`TestPowerCooldownAndRealDevicesRemainDisabled`、`TestMockStateAndFaults` | 离线 PASS。客户不得启禁端口，操作含至少 30 秒冷却；超时仍保留冷却／未知占用。物理收敛时间未实测 |
 | A13 PDU 供电不等于服务器启动 | `TestAPCProfileAndSupplySeparation`、`TestPowerAcceptedIsNotCompletion`、`TestPowerMockScenariosAndSupplySemantics`、`TestRedfishCapabilitiesAndResetEvidence` | 离线语义 PASS。supply_state 与 power_state 分离，reset 后 ON 不证明完成。双 PSU 线路、供电拓扑、实际开机证据 NOT_RUN |
 | A14 伪造服务／端口／头／票据 | `TestWHMCSOwnershipSignatureReplayAndLifecycle`、`TestWHMCSPortalSingleUseAndProtectionOnSuspend`、`TestWHMCSPHPRealHandlerContract`、`TestPowerUnknownFieldsAndOperator`、`TestRuntimePowerApprovalGuards`、`TestRuntimePowerApprovedLoopbackAndSecrets`；PHP `contract.php`／`http_contract.php` | PG、fixture、PHP 与真实 Go handler 跨语言契约 PASS。独立检查 integration/service/client/server 归属，HMAC nonce 与票据单次，浏览器不能选择原始端口或携带设备认证。Smarty4/5独立渲染已验；真实WHMCS客户会话与宿主模板整合仍待授权实例验证 |
@@ -85,6 +86,9 @@ OpenAPI 文件使用 JSON 语法（合法 YAML 1.2 子集），不增加 YAML �
 | A16 残留介质／键鼠／票据 | `TestConsoleExclusiveProtectionRestartAndCleanup`、`TestConsoleMediaIsolationProtectionAndRoleRevocation`、`TestConsoleLiveStreamRevokedBeforeHandoff`、`TestSecurityOperatorCannotDeleteMedia` | PG/mock PASS。释放前清除模拟挂载与按键、撤销 token/generation 并关闭旧 SSE，私有 ISO 不能跨客户读取。真实 USB gadget、挂载和视频进程撤销证据 NOT_RUN |
 
 ## 交付材料与后续实机入口
+
+- [集中外部依赖清单](external-dependencies.md)：27个缺口的编号、影响、安全获取方法、已有资料、模拟边界与提供阶段。
+- [SNMP显式算法与UDP验收](modules/snmp.md)、[模拟/真实控制台边界](modules/console.md)、[可复现交付工具](modules/delivery.md)：2026-10-19新增实现与证据。
 
 - [OpenAPI](../api/openapi.yaml) 和 [离线一致性检查器](../api/check_contract.py)：所有已实现 HTTP 路由与认证方式。
 - [驱动边界](modules/drivers.md)：PiKVM 定制协议、Redfish 能力发现、APC 明确固件 profile、SNMP 写保护及测试事实；不预填未知 OID。

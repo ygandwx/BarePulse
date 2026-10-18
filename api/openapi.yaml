@@ -4818,6 +4818,47 @@
           }
         }
       }
+    },
+    "/api/v1/servers/{id}/console-readiness": {
+      "get": {
+        "tags": [
+          "Console"
+        ],
+        "summary": "Inspect local console readiness without device I/O",
+        "operationId": "consoleReadiness",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "x-go-route": "GET /api/v1/servers/{id}/console-readiness",
+        "description": "Database-only advisory preflight. Rechecks ownership; exposes no credentials or device address. Request creation revalidates all conditions. Real channels remain disabled even when deployment device flags are true. queue_expected means another lease, block or cooldown may require waiting; the same actor can resume an existing session.",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleReadiness"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ID"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -6849,6 +6890,56 @@
             }
           }
         ]
+      },
+      "ConsoleReadiness": {
+        "type": "object",
+        "properties": {
+          "server_id": {
+            "$ref": "#/components/schemas/ID"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "unbound",
+              "simulated",
+              "real"
+            ]
+          },
+          "request_allowed": {
+            "type": "boolean"
+          },
+          "queue_expected": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mock_events",
+                "mock_input",
+                "private_media"
+              ]
+            }
+          }
+        },
+        "required": [
+          "server_id",
+          "mode",
+          "request_allowed",
+          "queue_expected",
+          "code",
+          "message",
+          "channels"
+        ],
+        "additionalProperties": false,
+        "x-go-type": "app.ConsoleReadiness"
       }
     },
     "responses": {

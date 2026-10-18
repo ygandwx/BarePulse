@@ -16,6 +16,7 @@ import (
 
 	"github.com/gosnmp/gosnmp"
 	"github.com/jackc/pgx/v5"
+	"github.com/ygandwx/BarePulse/backend/internal/drivers"
 )
 
 // TrafficCollector is read-only. Implementations return cumulative counters rather
@@ -26,6 +27,8 @@ type TrafficCollector interface {
 
 type SNMPTrafficCredentials struct {
 	Username        string `json:"username"`
+	AuthProtocol    string `json:"auth_protocol"`
+	PrivacyProtocol string `json:"privacy_protocol"`
 	AuthPassword    string `json:"auth_password"`
 	PrivacyPassword string `json:"privacy_password"`
 	ContextName     string `json:"context_name"`
@@ -51,8 +54,9 @@ func (c SNMPTrafficCollector) client(ctx context.Context) (*gosnmp.GoSNMP, error
 	if !c.Allowed {
 		return nil, fail(409, "real_devices_disabled", "Real device access is disabled")
 	}
-	if c.Credentials.Username == "" || len(c.Credentials.AuthPassword) < 8 || len(c.Credentials.PrivacyPassword) < 8 {
-		return nil, fail(409, "snmp_credentials_missing", "SNMPv3 AuthPriv credentials are required")
+	auth, privacy, err := drivers.ParseSNMPv3Algorithms(c.Credentials.AuthProtocol, c.Credentials.PrivacyProtocol)
+	if err != nil || drivers.ValidateSNMPv3Security(c.Credentials.Username, c.Credentials.AuthPassword, c.Credentials.PrivacyPassword, auth, privacy) != nil {
+		return nil, fail(409, "snmp_credentials_invalid", "Explicit supported SNMPv3 AuthPriv algorithms and bounded credentials are required")
 	}
 	host := c.Address
 	port := uint64(161)
@@ -66,9 +70,9 @@ func (c SNMPTrafficCollector) client(ctx context.Context) (*gosnmp.GoSNMP, error
 	if host == "" || strings.ContainsAny(host, "/\\@?# \r\n\t") {
 		return nil, fail(400, "invalid_snmp_address", "Use a registered hostname or IP, optionally with port")
 	}
-	client := &gosnmp.GoSNMP{Target: host, Port: uint16(port), Transport: "udp", Version: gosnmp.Version3, Context: ctx, Timeout: 3 * time.Second, Retries: 0, MaxOids: 20, MaxRepetitions: 20, SecurityModel: gosnmp.UserSecurityModel, MsgFlags: gosnmp.AuthPriv, ContextName: c.Credentials.ContextName, SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: c.Credentials.Username, AuthenticationProtocol: gosnmp.SHA256, AuthenticationPassphrase: c.Credentials.AuthPassword, PrivacyProtocol: gosnmp.AES, PrivacyPassphrase: c.Credentials.PrivacyPassword}}
+	client := &gosnmp.GoSNMP{Target: host, Port: uint16(port), Transport: "udp", Version: gosnmp.Version3, Context: ctx, Timeout: 3 * time.Second, Retries: 0, MaxOids: 20, MaxRepetitions: 20, SecurityModel: gosnmp.UserSecurityModel, MsgFlags: gosnmp.AuthPriv, ContextName: c.Credentials.ContextName, SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: c.Credentials.Username, AuthenticationProtocol: auth, AuthenticationPassphrase: c.Credentials.AuthPassword, PrivacyProtocol: privacy, PrivacyPassphrase: c.Credentials.PrivacyPassword}}
 	if err := client.Connect(); err != nil {
-		return nil, err
+		return nil, errors.New("SNMP connection failed")
 	}
 	return client, nil
 }
@@ -84,9 +88,19 @@ func (c SNMPTrafficCollector) Collect(ctx context.Context, src TrafficSource) (T
 	defer client.Conn.Close()
 	packet, err := client.Get(trafficOIDs(src.ExpectedIfIndex))
 	if err != nil {
+		return sample, sanitizedSNMPError(ctx, "SNMP collection failed")
+	}
+	if err := drivers.ValidateSNMPv3Response(packet); err != nil {
 		return sample, err
 	}
 	return trafficParseSNMP(packet, src, time.Now().UTC())
+}
+
+func sanitizedSNMPError(ctx context.Context, message string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return errors.New(message)
 }
 
 type TrafficInterface struct {
@@ -105,30 +119,44 @@ func (c SNMPTrafficCollector) Discover(ctx context.Context) ([]TrafficInterface,
 	}
 	defer client.Conn.Close()
 	interfaces := []TrafficInterface{}
-	err = client.BulkWalk(trafficIfNameOID, func(pdu gosnmp.SnmpPDU) error {
-		if len(interfaces) >= 10000 {
-			return errors.New("interface discovery exceeded bound")
+	// Inspect every response envelope; BulkWalk hides AuthPriv flags from its
+	// callback and would permit an authenticated but cleartext final response.
+	cursor, lastIndex := trafficIfNameOID, 0
+	for {
+		packet, err := client.GetBulk([]string{cursor}, 0, 20)
+		if err != nil {
+			return nil, sanitizedSNMPError(ctx, "SNMP interface discovery failed")
 		}
-		prefix := trafficIfNameOID + "."
-		name := pdu.Name
-		if !strings.HasPrefix(name, ".") {
-			name = "." + name
+		if err := drivers.ValidateSNMPv3Response(packet); err != nil {
+			return nil, err
 		}
-		if !strings.HasPrefix(name, prefix) {
-			return errors.New("unexpected interface discovery OID")
+		if packet.Error != gosnmp.NoError || len(packet.Variables) == 0 {
+			return nil, errors.New("SNMP interface discovery response error")
 		}
-		index, e := strconv.Atoi(strings.TrimPrefix(name, prefix))
-		if e != nil || index < 1 {
-			return errors.New("invalid interface index")
+		for _, pdu := range packet.Variables {
+			prefix := trafficIfNameOID + "."
+			name := "." + strings.TrimPrefix(pdu.Name, ".")
+			if pdu.Type == gosnmp.NoSuchObject || pdu.Type == gosnmp.NoSuchInstance {
+				return nil, errors.New("SNMP interface discovery object unavailable")
+			}
+			if pdu.Type == gosnmp.EndOfMibView || !strings.HasPrefix(name, prefix) {
+				return interfaces, nil
+			}
+			index, e := strconv.Atoi(strings.TrimPrefix(name, prefix))
+			if e != nil || index <= lastIndex {
+				return nil, errors.New("invalid or non-increasing interface index")
+			}
+			v, ok := pdu.Value.([]byte)
+			if !ok || pdu.Type != gosnmp.OctetString {
+				return nil, errors.New("invalid interface name")
+			}
+			if len(interfaces) >= 10000 {
+				return nil, errors.New("interface discovery exceeded bound")
+			}
+			interfaces = append(interfaces, TrafficInterface{IfIndex: index, IfName: string(v)})
+			cursor, lastIndex = name, index
 		}
-		v, ok := pdu.Value.([]byte)
-		if !ok || pdu.Type != gosnmp.OctetString {
-			return errors.New("invalid interface name")
-		}
-		interfaces = append(interfaces, TrafficInterface{IfIndex: index, IfName: string(v)})
-		return nil
-	})
-	return interfaces, err
+	}
 }
 
 func trafficParseSNMP(packet *gosnmp.SnmpPacket, src TrafficSource, at time.Time) (TrafficSample, error) {

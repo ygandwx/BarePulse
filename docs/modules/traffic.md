@@ -66,10 +66,10 @@
 设备 `credential_ref` 指定一个环境变量名，变量值为 JSON：
 
 ```json
-{"username":"READ_ONLY_ACCOUNT","auth_password":"FROM_SECRET_STORE","privacy_password":"FROM_SECRET_STORE","context_name":""}
+{"username":"READ_ONLY_ACCOUNT","auth_protocol":"SHA256","privacy_protocol":"AES","auth_password":"FROM_SECRET_STORE","privacy_password":"FROM_SECRET_STORE","context_name":""}
 ```
 
-该凭据结构仅演示字段，不能直接用作生产凭据。只支持 SNMPv3 AuthPriv，SHA-256 + AES；其它算法未默默降级。连接用设备登记的地址（主机或主机:端口），3 秒请求超时、0 次自动重试、10 秒整体截止时间，无 SET 调用。凭据不进数据库、响应、审计或错误消息。后台每 5 秒找应采来源，各来源间隔可配置为 10–3600 秒，并用 PostgreSQL advisory lock 防止多实例重复轮询。
+该凭据结构仅演示字段，不能直接用作生产凭据。只支持 SNMPv3 AuthPriv，算法必须显式指定；2026-10-19 起缺少算法字段的旧配置明确拒绝。算法列表、AES扩展差异及迁移见 [SNMP配置与协议验收](snmp.md)，不自动降级或猜测固件兼容性。连接用设备登记的地址（主机或主机:端口），3 秒请求超时、0 次自动重试、10 秒整体截止时间，无 SET 调用。凭据不进数据库、响应、审计或错误消息。后台每 5 秒找应采来源，各来源间隔可配置为 10–3600 秒，并用 PostgreSQL advisory lock 防止多实例重复轮询。
 
 ## 验证证据与边界
 
