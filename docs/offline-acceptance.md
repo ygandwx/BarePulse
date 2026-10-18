@@ -8,6 +8,7 @@
 
 ```sh
 python3 api/check_contract.py
+node scripts/tests/console-readiness.mjs
 python3 -B -m unittest discover -s scripts/tests -p test_export_offline_package.py -v
 sh scripts/verify.sh
 sh scripts/verify-whmcs.sh
@@ -17,6 +18,8 @@ Windows 等价命令：
 
 ```powershell
 python api/check_contract.py
+node scripts/tests/console-readiness.mjs
+python -B -m unittest discover -s scripts/tests -p test_export_offline_package.py -v
 ./scripts/verify.ps1
 ./scripts/verify-whmcs.ps1
 ```

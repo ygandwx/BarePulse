@@ -6,10 +6,10 @@
 
 - 分支 `codex/barepulse-implementation`；本轮从干净的本地 `7cfcbd3` 继续，最后旧实现 `225bf57`，保留全部已有代码和本地历史。恢复时远端 `ac1e4db` 与本地同 tree `3a5fc2537dd4a3f86d67a9b5202745d8b308eabb`。
 - 草稿 [PR #1](https://github.com/ygandwx/BarePulse/pull/1) 保持开放。开始时最新旧 [CI 38717357757](https://github.com/ygandwx/BarePulse/actions/runs/38717357757) 成功；不把旧 CI 当本轮新代码结果。
-- 本轮完成：集中27项外部依赖、逐阶段证据与阻塞总览、SNMP显式算法和真实UDP回环契约、控制台只读预检/慢客户端撤销、已知PiKVM目标监测组件、可复现源码交付工具。当前正在集成验证；提交/远端/最终归档记录随后更新。
+- 本轮首个实现提交 `422beb618264b186d5222bc08220022c2befd08b` 已发布为远端 `f308ebdf51bd9f41ffb3f1953fb582ddd2d3ab77`，同tree `cbb60441785de3cc7e0d94f39fc2d3b34e1f03d6`。集中27项外部依赖、阶段总览、SNMP算法/UDP契约、控制台预检/慢连接撤销及已知PiKVM目标监测已保存。本轮交付工具与CI接入继续集成。
 - 本地 PostgreSQL 重启并完成自身崩溃恢复；继续使用原开发库，没有重建/替换。原模拟 protected 会话及私有媒体保留。
 - 真实设备访问和写操作仍为 false；没有调用真实设备或部署生产。外部材料只在[集中清单](external-dependencies.md)维护，不要求提交密码、token或私钥。
-- 下一条准确任务：完成本轮前端浏览器检查、全仓回归和交付工具CI，提交并发布已核验增量；真实网关剩余适配按 KV-01–KV-04 的材料缺口继续。
+- 下一条准确任务：发布已核验交付工具增量并检查CI，从干净HEAD导出源码ZIP/bundle/manifest；真实网关剩余适配按 KV-01–KV-04 的材料缺口继续。
 
 ## 阶段状态
 
@@ -41,6 +41,9 @@
 | OpenAPI检查 | PASS：86操作/81路由/56验收测试引用 | 新增只读预检JSON与认证契约 |
 | 浏览器本轮流程 | PASS：登录、未绑定禁用、模拟模式/占用提示、真实模式拒绝、原protected保留，error日志为空 | 仅新增DEMO-READINESS-REAL和文档示例地址设备的本地绑定；无真实请求。截图barepulse-console-readiness-20261019.png留在交付outputs |
 | PHP离线回归 | PASS：8文件lint、96 stub、112累计HTTP断言 | 不代表真实WHMCS宿主通过 |
+| [本轮协议/控制台 CI 39149736617](https://github.com/ygandwx/BarePulse/actions/runs/39149736617) | PASS：Linux全套race app25.863s/drivers5.834s，API86/81/56、PHP、Compose构建/迁移/bootstrap与8项首链 | remote f308ebd/local422beb6同树；交付工具接入在下一增量，不能混用为其CI结果 |
+| 交付工具CRLF增量与完整回归 | PASS：13/13，60.560s，无skip；新增定向3.825s | 实际复现干净CRLF误判与archive转码，两处均修复；仅保留有效行尾配置白名单，未继承helpers/filters/任意GIT环境，原工作区不改写 |
+| 文档与前端导入 | PASS：README/docs全部相对文件链接存在，5个实际ES module import | 不把链接检查当作设备协议证明 |
 
 ## 已实现与关键决定
 

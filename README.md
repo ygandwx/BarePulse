@@ -50,6 +50,10 @@ API 契约执行 `python3 api/check_contract.py`（Windows 用已安装的 Pytho
 | [开发流程与架构图](docs/development-workflow.md) | 系统架构、阶段依赖、持续实现循环、具体任务与验收门槛 |
 | [Codex 编码规则](AGENTS.md) | 持续推进、设备边界、测试、提交与暂停条件 |
 | [实现进度与续接记录](docs/implementation-status.md) | 阶段状态、测试证据、阻塞与下一条任务 |
+| [集中外部依赖清单](docs/external-dependencies.md) | 六类设备/实例的27项缺口、已有材料、安全收集方式、模拟边界和提供时机 |
+| [SNMP配置与协议测试](docs/modules/snmp.md) | 显式算法、AES扩展差异、旧配置迁移和UDP故障测试 |
+| [控制台边界](docs/modules/console.md) | 模拟/真实预检、慢连接撤销、目标监测及尚缺真实通道 |
+| [离线源码交付](docs/modules/delivery.md) | 已提交源码ZIP、完整Git bundle、逐文件哈希及可复现导出工具 |
 | [离线验收矩阵](docs/offline-acceptance.md) | A01–A16 对应代码、实际测试和实机边界 |
 | [OpenAPI 3.1](api/openapi.yaml) | 当前 HTTP 接口、认证与错误契约 |
 | [电源驱动](docs/modules/drivers.md) / [IPMI](docs/modules/ipmi.md) | 真实访问默认关闭、精确设备授权、协议证据、结果语义和离线测试 |

@@ -35,6 +35,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y php-cli php-curl
       - run: sh scripts/verify.sh
       - run: python3 api/check_contract.py
+      - run: node scripts/tests/console-readiness.mjs
+      - name: Verify offline delivery with real Git fixtures
+        run: python3 -B -m unittest discover -s scripts/tests -p test_export_offline_package.py -v
       - run: sh scripts/verify-whmcs.sh
       - run: docker compose config --quiet
         env:
